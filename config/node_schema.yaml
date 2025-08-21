@@ -1,19 +1,22 @@
-target:
+targets:
   id: id
   name: approvedSymbol
-  extra: [biotype, approvedName]
+  props: [biotype, approvedName]
 
-disease:
+diseases:
   id: id
+  name: diseaseFromSource
+  props: [therapeuticAreas]
 
-drug:
+molecule:
   id: id
-  extra: [maximumClinicalTrialPhase]
+  props: [maximumClinicalTrialPhase]
 
-pathway:
-  id: pathwayId
-  name: pathwayName
+reactome:
+  id: id
+  name: label
+  props: [ancestors, descendants]
 
-function:
+go:
   id: id
   name: name
