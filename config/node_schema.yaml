@@ -1,0 +1,19 @@
+target:
+  id: id
+  name: approvedSymbol
+  extra: [biotype, approvedName]
+
+disease:
+  id: id
+
+drug:
+  id: id
+  extra: [maximumClinicalTrialPhase]
+
+pathway:
+  id: pathwayId
+  name: pathwayName
+
+function:
+  id: id
+  name: name

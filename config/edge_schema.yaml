@@ -1,0 +1,25 @@
+sourceId=cancer_biomarkers:
+  source: targetId
+  target: diseaseId
+  relation: affected_pathway
+  props: [score, confidence, literature, year]
+
+# chembl_drug_disease.yaml
+sourceId=chembl:
+  source: drugId
+  target: diseaseId
+  relation: treats
+  props: [clinicalPhase, score]
+
+# chembl_drug_target.yaml
+sourceId=chembl:
+  source: drugId
+  target: targetId
+  relation: modulates
+  props: [score]
+
+sourceId=reactome:
+  source: targetId
+  target: pathwayId
+  relation: participates_in
+  props: []
