@@ -1,0 +1,35 @@
+# these are static edges that have no year, only datasourceId and id
+# in the parser, value of 0 will be added to year column
+
+# protein protein interaction
+interactionEvidence:
+  source: targetA   # ENSG id of protein A
+  target: targetB   # ENSG id of protein B
+  relation_name: interacts_with
+  props: [id, datasourceId=constant:interactionEvidence, score=constant:1.0]
+
+# pathway subtype information
+reactome:
+  # Edge: pathway → parent
+  source: id
+  target: parents
+  relation_name: is_subpathway_of
+  props: [id, datasourceId=constant:reactome, score=constant:1.0]
+
+  # # Edge: pathway → child
+  # - source: id
+  #   target: children
+  #   relation_name: has_subpathway
+
+# disease subtype information
+diseases:
+  # Edge: disease → parent
+  source: id
+  target: parents
+  relation_name: is_subtype_of
+  props: [id, datasourceId=constant:disease_ontology, score=constant:1.0]
+
+  # # Edge: disease → child
+  # - source: id
+  #   target: children
+  #   relation_name: has_subtype
