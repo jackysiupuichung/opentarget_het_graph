@@ -1,178 +1,178 @@
 # TODO: consider resource score or score for downstream process
 # are there duplicate evidences where source and target and relation are the same?
 
-# for each edge, we log the properties evidence_id (id), score, literature, publicationYear for temporal tracing back to evidence
+# for each edge, we log the properties evidence_id (id), score, curationYear for temporal tracing back to evidence
 
 sourceId=cancer_biomarkers:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 # chembl_drug_disease.yaml
 sourceId=chembl:
   - source: drugId
     target: diseaseId
     relation_name: clinical_trial
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
 
   - source: drugId
     target: targetId
     relation_name: modulated_by
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
 
 # provide direct and mechanistic edge for pathway related
 sourceId=reactome:
   - source: targetId
     target: diseaseId
     relation: datatypeId
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
     
   - source: targetId
     target: pathways.id
     relation_name: involved_in
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
 
   - source: diseaseId
     target: pathways.id
     relation: datatypeId
     relation_name: associated_with
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
 
 sourceId=clingen:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 # variant as node?
 sourceId=eva:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=gene_burden:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=intogen:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 # provide direct and mechanistic edge for pathway related
 sourceId=slapenrich:
   - source: targetId
     target: diseaseId
     relation: datatypeId
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
 
   - source: targetId
     target: pathways.id
     relation_name: involved_in
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
 
   - source: diseaseId
     target: pathways.id
     relation_name: associated_with
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
 
 sourceId=crispr:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=eva_somatic:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=genomics_england:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=orphanet:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=sysbio:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=cancer_gene_census:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=crispr_screen:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  prop: [cellType, score, literature, publicationYear, id]
+  props: [cellType, datasourceId, score, curationYear, id]
 
 sourceId=expression_atlas:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 # pathways as nodes?
 sourceId=progeny:
   - source: targetId
     target: diseaseId
     relation: datatypeId
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
 
   - source: targetId
     target: pathways.id
     relation_name: involved_in
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
 
   - source: diseaseId
     target: pathways.id
     relation: datatypeId
-    props: [score, literature, publicationYear, id]
+    props: [datasourceId, score, curationYear, id]
 
 sourceId=uniprot_literature:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=europepmc:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=gene2phenotype:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 # phenotypes as nodes?
 sourceId=impc:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
 
 sourceId=uniprot_variants:
   source: targetId
   target: diseaseId
   relation: datatypeId
-  props: [score, literature, publicationYear, id]
+  props: [datasourceId, score, curationYear, id]
