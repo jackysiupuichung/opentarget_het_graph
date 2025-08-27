@@ -7,6 +7,7 @@ import traceback
 
 
 REQUIRED_EDGE_COLS = ["source", "target", "relation", "datasourceId", "score", "year"]
+YEAR_PRIORITY = ["curationYear", "studyYear", "publicationYear", "studyStartDate"]
 
 
 class BaseParser:
@@ -162,16 +163,13 @@ class EdgeParser(BaseParser):
         return raw_val
 
     @staticmethod
-    def _add_props(edge, row, props, wants_year):
-        """Add props (constants or from df) and enforce year"""
+    def _add_props(edge, row, props):
+        # Add all props first
         for p in props:
-            # constants from YAML (e.g., score=constant:1.0)
             if isinstance(p, str) and "=" in p and "constant:" in p:
                 k, v = p.split("=", 1)
                 edge[k] = float(v.split("constant:")[1]) if k == "score" else v.split("constant:")[1]
                 continue
-
-            # props from dataframe
             if p in row and pd.notnull(row[p]):
                 val = row[p]
                 if isinstance(val, np.ndarray):
@@ -180,9 +178,28 @@ class EdgeParser(BaseParser):
                     val = str(val)
                 edge[p] = val
 
-        if not wants_year:
+        # Handle year
+        if "year" in props:
+            # Dynamic edges → pick best year candidate
+            for col in YEAR_PRIORITY:
+                if col in row and pd.notnull(row[col]):
+                    if col == "studyStartDate":
+                        try:
+                            edge["year"] = pd.to_datetime(row[col], errors="coerce").year
+                            return edge
+                        except Exception:
+                            continue
+                    else:
+                        edge["year"] = row[col]
+                        return edge
+            edge["year"] = np.nan  # fallback if no usable column
+        else:
+            # Static edges → force 0
             edge["year"] = 0
+
         return edge
+
+
 
     def apply_spec(self, df, spec, name):
         src_col = spec["source"]
@@ -190,44 +207,32 @@ class EdgeParser(BaseParser):
 
         # Decide relation value
         if "relation" in spec:
-            relation_value = spec["relation"]   # column name in df
+            relation_value = spec["relation"]
             relation_is_column = True
         elif "relation_name" in spec:
-            relation_value = spec["relation_name"]  # constant string
+            relation_value = spec["relation_name"]
             relation_is_column = False
         else:
             raise ValueError(f"No relation or relation_name in spec for {name}")
 
         props = spec.get("props", [])
-        wants_year = "year" in props
 
         # === Case 1: Direct column-to-column edges ===
         if tgt_col in df.columns and "." not in tgt_col:
             sample_val = df[tgt_col].iloc[0]
             if not isinstance(sample_val, (list, tuple, np.ndarray)):
-                cols = {"source": src_col, "target": tgt_col}
-                if relation_is_column:
-                    cols["relation"] = relation_value
-                else:
-                    df = df.copy()
-                    df["relation"] = relation_value
-                    cols["relation"] = "relation"
+                expanded_edges = []
+                for _, row in df.iterrows():
+                    edge = {
+                        "source": row[src_col],
+                        "target": row[tgt_col],
+                        "relation": row[relation_value] if relation_is_column else relation_value,
+                    }
+                    expanded_edges.append(self._add_props(edge, row, props))
 
-                if props:
-                    for p in props:
-                        if not (isinstance(p, str) and "=" in p and "constant:" in p):
-                            if p in df.columns:
-                                cols[p] = p
-
-                out = df[list(cols.values())].rename(columns={v: k for k, v in cols.items()})
-                if not wants_year:
-                    out["year"] = 0
-
-                # add constants
-                for const in [p for p in props if isinstance(p, str) and "constant:" in p]:
-                    k, v = const.split("=", 1)
-                    out[k] = float(v.split("constant:")[1]) if k == "score" else v.split("constant:")[1]
-
+                out = pd.DataFrame(expanded_edges)
+                # if "year" not in out.columns:
+                #     out["year"] = 0
                 return out
 
         # === Case 2: Nested dict expansion (e.g. pathways.id) ===
@@ -245,12 +250,16 @@ class EdgeParser(BaseParser):
                             edge = {
                                 "source": row[src_col],
                                 "target": t_val,
-                                "relation": relation_value if not relation_is_column else row.get(relation_value),
+                                "relation": row[relation_value] if relation_is_column else relation_value,
                             }
-                            expanded_edges.append(self._add_props(edge, row, props, wants_year))
-                return pd.DataFrame(expanded_edges) if expanded_edges else pd.DataFrame(columns=["source", "target", "relation"] + props + ([] if wants_year else ["year"]))
+                            expanded_edges.append(self._add_props(edge, row, props))
 
-        # === Case 3: List-like target expansion (parents, children, etc.) ===
+                out = pd.DataFrame(expanded_edges)
+                # if "year" not in out.columns:
+                #     out["year"] = 0
+                return out
+
+        # === Case 3: List-like target expansion ===
         if tgt_col in df.columns:
             expanded_edges = []
             for _, row in df.iterrows():
@@ -261,10 +270,14 @@ class EdgeParser(BaseParser):
                     edge = {
                         "source": row[src_col],
                         "target": t,
-                        "relation": relation_value if not relation_is_column else row.get(relation_value),
+                        "relation": row[relation_value] if relation_is_column else relation_value,
                     }
-                    expanded_edges.append(self._add_props(edge, row, props, wants_year))
-            return pd.DataFrame(expanded_edges) if expanded_edges else pd.DataFrame(columns=["source", "target", "relation"] + props + ([] if wants_year else ["year"]))
+                    expanded_edges.append(self._add_props(edge, row, props))
+
+            out = pd.DataFrame(expanded_edges)
+            # if "year" not in out.columns:
+            #     out["year"] = 0
+            return out
 
         raise ValueError(f"Unsupported target {tgt_col} for {name}")
 
@@ -277,27 +290,10 @@ class EdgeParser(BaseParser):
         if not self.node_store:
             return df  # nothing to validate against
 
-        before = len(df)
         src_valid = df["source"].astype(str).isin(set.union(*self.node_store.values()))
         tgt_valid = df["target"].astype(str).isin(set.union(*self.node_store.values()))
 
-        # Extract invalid rows before filtering
-        invalid_row = df[~(src_valid & tgt_valid)]
-        # not_found_src = invalid_row.loc[~invalid_row["source"].astype(str).isin(set.union(*self.node_store.values())), "source"].unique()
-        # not_found_tgt = invalid_row.loc[~invalid_row["target"].astype(str).isin(set.union(*self.node_store.values())), "target"].unique()
-
-        # Keep only valid rows
         df = df[src_valid & tgt_valid]
-        # after = len(df)
-
-        # if after < before:
-        #     print(f"originally there are {before} edges")
-        #     print(f"⚠️ {before-after} edges removed during validation for {name}")
-        #     print(f"Total invalid edges: {len(invalid_row)}")
-        #     print("First 5 not found targets:", not_found_tgt[:5])
-        #     print("Total not found targets:", len(not_found_tgt))
-        #     print(f"Edges discarded due to missing target: {invalid_row.loc[~invalid_row['target'].astype(str).isin(set.union(*self.node_store.values()))].shape[0]}")
-
         return df
     
     def serialise(self, df, out_path):
@@ -313,11 +309,20 @@ class EdgeParser(BaseParser):
             return
 
         before = len(df)
-        df = df.dropna(subset=REQUIRED_EDGE_COLS)
-        after = len(df)
 
-        if after < before:
-            print(f"⚠️ Dropped {before - after} edges missing required fields in {out_path}")
+        # Find rows that would be dropped
+        # dropped = df[df[REQUIRED_EDGE_COLS].isnull().any(axis=1)]
+        # if not dropped.empty:
+        #     print(f"⚠️ Dropping {len(dropped)} edges in {out_path} missing required fields:")
+        #     if "id" in dropped.columns:
+        #         print("   First 5 dropped IDs:", dropped["id"].head(5).tolist())
+        #     else:
+        #         cols_to_show = [c for c in ["source", "target", "relation"] if c in dropped.columns]
+        #         print("   First 5 dropped rows:")
+        #         print(dropped[cols_to_show].head(5).to_string(index=False))
+
+        # Drop rows with missing required fields
+        df = df.dropna(subset=REQUIRED_EDGE_COLS)
 
         # Normalise list-like props (e.g. literature)
         for col in df.columns:
@@ -335,5 +340,3 @@ class EdgeParser(BaseParser):
             print(f"💾 Saved → {out_path} ({len(df)} rows)")
         else:
             print(f"⚠️ No valid edges left for {out_path}, skipping save.")
-
-

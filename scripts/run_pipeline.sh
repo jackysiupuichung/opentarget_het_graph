@@ -9,8 +9,8 @@ INPUT="evidenceDated_subset"
 NODE_SCHEMA="config/node_schema.yaml"
 EDGE_SCHEMA="config/edge_schema.yaml"
 STATIC_EDGE_SCHEMA="config/static_edge_schema.yaml"
-NODE_OUTPUT="kg_output/nodes"
-EDGE_OUTPUT="kg_output/edges"
+NODE_OUTPUT="data/kg_output/nodes"
+EDGE_OUTPUT="data/kg_output/edges"
 
 # === Run pipeline ===
 echo "🚀 Running Knowledge Graph pipeline..."
