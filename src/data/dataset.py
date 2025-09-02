@@ -35,20 +35,25 @@ class InteractionDataset(Dataset):
     """
 
     def __init__(self, df, user_map, item_map,
-                 num_neg=0, dynamic=False, exhaustive_eval=False,
+                 num_neg=0, dynamic=False, exhaustive_eval=False, num_eval_negs=None,
                  all_interactions=None, seed=42):
         self.df = df.reset_index(drop=True)
         self.user_map = user_map
         self.item_map = item_map
+        self.df["user_idx"] = self.df["user_id"].astype(str).map(self.user_map)
+        self.df["item_idx"] = self.df["item_id"].astype(str).map(self.item_map)
         self.num_users = len(user_map)
         self.num_items = len(item_map)
 
         self.num_neg = num_neg
         self.dynamic = dynamic
         self.exhaustive_eval = exhaustive_eval
+        self.num_eval_negs = num_eval_negs  # used only if not exhaustive
         self.rng = np.random.default_rng(seed)
 
         self.all_interactions = all_interactions if all_interactions else {}
+        # This gets all the users that have positive interaction before temporal split
+        self.users_in_df = set(self.user_map[str(u)] for u in self.df["user_id"].astype(str))
         self.sampler = UniformNegSampler(self.num_items, num_neg, seed) if num_neg > 0 else None
 
         # expanded samples (u, i, label)
@@ -56,9 +61,10 @@ class InteractionDataset(Dataset):
 
         if self.exhaustive_eval:
             self._build_exhaustive_samples()
+        elif self.num_eval_negs is not None:
+            self._build_sampled_eval_samples()
         else:
-            # self.resample()
-            print("resample is done at start of epoch")
+            self.resample()
 
         print("✅ InteractionDataset built:", self.dataset_description())
 
@@ -66,35 +72,68 @@ class InteractionDataset(Dataset):
     # Train negatives (dynamic)
     # -----------------------
     def resample(self):
-        """Expand positives + fresh negatives for training."""
+        """Expand positives + fresh negatives for training (only users with positives in df)."""
         samples = []
         for _, row in self.df.iterrows():
-            u = self.user_map[str(row["user_id"])]
-            i = self.item_map[str(row["item_id"])]
-            samples.append((u, i, 1.0))  # positive
+            u, i, score = row["user_idx"], row["item_idx"], float(row["label"])
+            if u not in self.users_in_df:
+                continue
+            samples.append((u, i, score))  # use score from df
 
             positives = self.all_interactions.get(u, set())
             if self.sampler:
                 negs = self.sampler.sample(positives)
                 for n in negs:
-                    samples.append((u, n, 0.0))
+                    samples.append((u, n, 0.0))  # negatives are always 0
         self.samples = samples
-
     # -----------------------
     # Eval negatives (static exhaustive)
     # -----------------------
     def _build_exhaustive_samples(self):
-        """Expand positives + all other items as negatives (static)."""
+        """Positives + all other items as negatives (per user)."""
         samples = []
         all_items = set(self.item_map.values())
-        for _, row in self.df.iterrows():
-            u = self.user_map[str(row["user_id"])]
-            i = self.item_map[str(row["item_id"])]
-            samples.append((u, i, 1.0))  # positive
 
+        for u in self.users_in_df:
             positives = self.all_interactions.get(u, set())
+            user_rows = self.df[self.df["user_idx"] == u]
+
+            # add positives with score
+            for _, row in user_rows.iterrows():
+                samples.append((u, row["item_idx"], float(row["label"])))
+
+            # add all remaining as negatives
             for n in all_items - positives:
                 samples.append((u, n, 0.0))
+
+        self.samples = samples
+
+    # -----------------------
+    # Eval negatives (sampled)
+    # -----------------------
+    def _build_sampled_eval_samples(self):
+        """Positives (with scores) + K sampled negatives per user."""
+        samples = []
+        all_items = np.array(list(self.item_map.values()))
+
+        for u in self.users_in_df:
+            positives = self.all_interactions.get(u, set())
+            user_rows = self.df[self.df["user_idx"] == u]
+
+            # add positives with score
+            for _, row in user_rows.iterrows():
+                samples.append((u, row["item_idx"], float(row["label"])))
+
+            # sample negatives
+            candidates = np.setdiff1d(all_items, list(positives))
+            negs = self.rng.choice(
+                candidates,
+                size=min(self.num_eval_negs, len(candidates)),
+                replace=False
+            )
+            for n in negs:
+                samples.append((u, n, 0.0))
+
         self.samples = samples
 
     # -----------------------
@@ -140,6 +179,7 @@ class InteractionDataset(Dataset):
             "num_users": self.num_users,
             "num_items": self.num_items,
             "num_pos_interactions": len(self.df),
+            "num_pos_users": len(self.users_in_df),
             "num_samples": len(self.samples),
             "num_neg_per_pos": self.num_neg,
             "dynamic_neg_sampling": self.dynamic,

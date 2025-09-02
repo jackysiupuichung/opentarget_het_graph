@@ -42,6 +42,9 @@ class BaseRecLightning(pl.LightningModule):
                 if l > 0:  # only positives
                     user_to_gt.setdefault(int(u), set()).add(int(i))
 
+        # Assert: must have at least one positive in eval
+        assert len(user_to_gt) > 0, f"[{stage}] No positives found in dataset! Check your split or labels."
+
         recalls = {K: [] for K in self.k}
         ndcgs = {K: [] for K in self.k}
 

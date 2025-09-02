@@ -135,7 +135,8 @@ def main(cfg):
     user_map = {nid: i for i, nid in enumerate(nodes["diseases"]["id"].astype(str).tolist())}
     item_map = {nid: i for i, nid in enumerate(nodes["targets"]["id"].astype(str).tolist())}
     print(f"✅ Built id_maps: {len(user_map)} diseases, {len(item_map)} targets")
-    all_interactions = build_all_interactions(train_df, user_map, item_map)
+    # This includes all interactions within the training set to avoid temporal leakage
+    train_interactions = build_all_interactions(train_df, user_map, item_map)
     # -----------------------
     # Step 4: Build hetero graph
     # -----------------------
@@ -159,6 +160,7 @@ def main(cfg):
         )
         # Save for reuse
         if getattr(cfg.data, "graph_file", None):
+            os.makedirs(os.path.dirname(cfg.data.graph_file), exist_ok=True)
             torch.save(hetero_graph, cfg.data.graph_file)
             print(f"💾 Hetero graph saved to {cfg.data.graph_file}")
 
@@ -169,15 +171,16 @@ def main(cfg):
     # Step 5: Build datasets
     # -----------------------
     print("✅ Building datasets...")
+    print(train_df.head())
     train_ds = InteractionDataset(train_df, user_map, item_map,
                                   num_neg=cfg.train.num_neg, dynamic=True,
-                                  all_interactions=all_interactions)
+                                  all_interactions=train_interactions)
     valid_ds = InteractionDataset(valid_df, user_map, item_map,
-                                  exhaustive_eval=True,
-                                  all_interactions=all_interactions)
+                                 exhaustive_eval=False, num_eval_negs=cfg.eval.num_eval_negs,
+                                 all_interactions=train_interactions)
     test_ds = InteractionDataset(test_df, user_map, item_map,
                                  exhaustive_eval=True,
-                                 all_interactions=all_interactions)
+                                 all_interactions=train_interactions)
     # === Build loaders ===
     if cfg.model.name == "ncf":
         train_loader = train_ds.build_ncf_loader(batch_size=cfg.train.batch_size, shuffle=True)

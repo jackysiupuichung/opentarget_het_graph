@@ -8,7 +8,9 @@ data:
   cutoff: 2015
   horizon: 5
   cold_start_file: data/cold_start_diseases.csv
-  graph: kg_output/hetero_graph_2010_5.pt
+  graph_file: kg_output/hetero_graph_2010_5.pt
+  node_dir: data/kg_output/nodes/
+  edge_dir: data/kg_output/edges/
   disease_nodes: data/kg_output/nodes/diseases.parquet   # users
   target_nodes: data/kg_output/nodes/targets.parquet     # items
 
@@ -27,8 +29,8 @@ model:
 # Training settings
 # ========================
 train:
-  epochs: 1
-  batch_size: 256
+  epochs: 10
+  batch_size: 512
   lr: 1e-3
   seed: 42
   num_neg: 1
@@ -37,6 +39,7 @@ train:
 # Evaluation settings
 # ========================
 eval:
+  num_eval_negs: 1000
   topk: [10, 50]
   metrics: ["Recall", "NDCG"]
   valid_metric: NDCG@10
