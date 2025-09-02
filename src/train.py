@@ -25,6 +25,67 @@ def build_all_interactions(df, user_map, item_map):
         all_interactions.setdefault(uid, set()).add(iid)
     return all_interactions
 
+def serialise_predictions(trainer, model, dataloader, run_dir, user_map, item_map, stage, is_graph=False):
+    """
+    Run predictions using trainer.predict, then save to CSV + save user/item maps.
+    """
+    # Run inference (list of batch outputs from predict_step)
+    preds = trainer.predict(model, dataloaders=dataloader)
+
+    # Flatten list of tensors
+    if isinstance(preds[0], dict):
+        # if predict_step returns dicts (more flexible)
+        preds = {k: torch.cat([b[k] for b in preds]).cpu().numpy() for k in preds[0].keys()}
+        users, items, labels, scores = preds["user"], preds["item"], preds["label"], preds["pred"]
+    else:
+        # if predict_step just returns scores
+        scores = torch.cat(preds).cpu().numpy()
+        # fall back: dataloader still holds user/item/labels
+        users, items, labels = [], [], []
+        for batch in dataloader:
+            if is_graph:
+                users.extend(batch.edge_label_index[0].cpu().tolist())
+                items.extend(batch.edge_label_index[1].cpu().tolist())
+                labels.extend(batch.edge_label.cpu().tolist())
+            else:
+                users.extend(batch["user_id"].cpu().tolist())
+                items.extend(batch["item_id"].cpu().tolist())
+                labels.extend(batch["label"].cpu().tolist())
+        users, items, labels = map(torch.tensor, (users, items, labels))
+
+    # Reverse maps
+    rev_user_map = {v: k for k, v in user_map.items()}
+    rev_item_map = {v: k for k, v in item_map.items()}
+
+    user_names = [rev_user_map.get(int(u), u) for u in users]
+    item_names = [rev_item_map.get(int(i), i) for i in items]
+
+    # Save predictions CSV
+    df = pd.DataFrame({
+        "user_id": user_names,
+        "item_id": item_names,
+        "label": labels.tolist(),
+        "pred": scores.tolist(),
+    })
+    pred_dir = os.path.join(run_dir, "predictions")
+    os.makedirs(pred_dir, exist_ok=True)
+
+    out_path = os.path.join(pred_dir, f"{stage}_predictions.csv")
+    df.to_csv(out_path, index=False)
+    print(f"💾 {stage} predictions saved to {out_path}")
+
+    # # Save user/item maps (JSON for reusability)
+    # map_dir = os.path.join(run_dir, "mappings")
+    # os.makedirs(map_dir, exist_ok=True)
+
+    # with open(os.path.join(map_dir, "user_map.json"), "w") as f:
+    #     json.dump(user_map, f)
+    # with open(os.path.join(map_dir, "item_map.json"), "w") as f:
+    #     json.dump(item_map, f)
+    # print(f"💾 User/item maps saved to {map_dir}")
+
+    return df
+
 
 def main(cfg):
     pl.seed_everything(cfg.train.seed)
@@ -64,7 +125,9 @@ def main(cfg):
     edges = edges[edges['year'] <= cfg.data.cutoff]
     # TODO: based on datatype or datasource
     edges = get_most_evidented_edges(edges)
-    print(edges.head(), "edges", edges.shape)
+
+    # TODO: create pretrained_embeddings
+    pretrained_embeddings = None
 
     # -----------------------
     # Step 3: Generate id_maps
@@ -108,12 +171,13 @@ def main(cfg):
         valid_loader = valid_ds.build_ncf_loader(batch_size=cfg.train.batch_size, shuffle=False)
         test_loader  = test_ds.build_ncf_loader(batch_size=cfg.train.batch_size, shuffle=False)
         # TODO: integrate pretrained_embeddings
-        model = initialise_model(cfg, user_map=user_map, item_map=item_map)
+        model = initialise_model(cfg, user_map=user_map, item_map=item_map, pretrained_embeddings=pretrained_embeddings)
 
     else:  # Graph pipeline
         train_loader = train_ds.build_graph_loader(hetero_graph, batch_size=cfg.train.batch_size, shuffle=True)
         valid_loader = valid_ds.build_graph_loader(hetero_graph, batch_size=cfg.train.batch_size, shuffle=False)
         test_loader  = test_ds.build_graph_loader(hetero_graph, batch_size=cfg.train.batch_size, shuffle=False)
+        model = initialise_model(cfg, user_map=user_map, item_map=item_map, hetero_data=hetero_graph, pretrained_embeddings=pretrained_embeddings)
         # TODO: integrate pretrained_embeddings
     # -----------------------
     # Step 5: Dynamic monitor
@@ -141,22 +205,30 @@ def main(cfg):
     best_model_path = checkpoint_cb.best_model_path
     print(f"✅ Best model saved at: {best_model_path}")
 
-    # best_model = trainer.load_from_checkpoint(
-    #     best_model_path,
-    #     model=model,
-    #     lr=cfg.train.lr,
-    #     k=cfg.eval.topk,
-    #     train_interactions=train_ds if cfg.model.name == "ncf" else None,
-    #     loss_type=cfg.model.loss_type,
-    # )
+    if cfg.model.name.lower() == "ncf":
+        best_model = NCFRecLightning.load_from_checkpoint(
+            best_model_path,
+            model=model,
+            lr=cfg.train.lr,
+            k=cfg.eval.topk,
+            loss_type=cfg.model.loss_type,
+        )
+    else:
+        best_model = GraphRecLightning.load_from_checkpoint(
+            best_model_path,
+            model=model,
+            lr=cfg.train.lr,
+            k=cfg.eval.topk,
+            loss_type=cfg.model.loss_type,
+        )
+
+    best_model = best_model.to(trainer.lightning_module.device)
 
     # -----------------------
     # Step 8: Collect predictions
     # -----------------------
-    val_preds, val_users, val_items, val_labels = trainer.predict(best_model, valid_loader)
-    test_preds, test_users, test_items, test_labels = trainer.predict(best_model, test_loader)
-    trainer.serialise(val_preds, val_users, val_items, val_labels, run_dir, user_map, item_map, stage="val")
-    trainer.serialise(test_preds, test_users, test_items, test_labels, run_dir, user_map, item_map, stage="test")
+    serialise_predictions(trainer, best_model, valid_loader, run_dir, user_map, item_map, stage="val", is_graph=(cfg.model.name!="ncf"))
+    serialise_predictions(trainer, best_model, test_loader, run_dir, user_map, item_map, stage="test", is_graph=(cfg.model.name!="ncf"))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

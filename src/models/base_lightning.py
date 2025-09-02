@@ -27,21 +27,6 @@ class BaseRecLightning(pl.LightningModule):
             return F.mse_loss(torch.sigmoid(preds), labels.float())
         elif self.loss_type == "bce":
             return F.binary_cross_entropy_with_logits(preds, labels.float())
-        elif self.loss_type == "bpr":
-            if neg_items is None:
-                raise ValueError("❌ BPR loss requires negative items")
-
-            pos_preds = preds.unsqueeze(1)  # [batch, 1]
-            mask = neg_items != -1
-            if not mask.any():
-                return torch.tensor(0.0, device=self.device)
-
-            user_exp = user.unsqueeze(1).expand_as(neg_items)[mask]
-            valid_neg_items = neg_items[mask]
-            neg_preds = self(user_exp, valid_neg_items).view(-1)
-            pos_preds = pos_preds.expand_as(neg_items)[mask]
-
-            return -torch.log(torch.sigmoid(pos_preds - neg_preds) + 1e-8).mean()
         else:
             raise ValueError(f"Unknown loss_type: {self.loss_type}")
 
@@ -98,44 +83,14 @@ class BaseRecLightning(pl.LightningModule):
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
 
-    # -----------------------
-    # Serialisation
-    # -----------------------
-    @staticmethod
-    def serialise(best_model, dataloader, run_dir, user_map, item_map, stage, is_graph=False):
-        preds, users, items, labels = [], [], [], []
-        best_model.eval()
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        best_model.to(device)
-
-        with torch.no_grad():
-            for batch in dataloader:
-                if is_graph:
-                    p = best_model(batch).squeeze().cpu()
-                    preds.extend(p.tolist())
-                    users.extend(batch.edge_label_index[0].cpu().tolist())
-                    items.extend(batch.edge_label_index[1].cpu().tolist())
-                    labels.extend(batch.edge_label.cpu().tolist())
-                else:
-                    u, i, l = batch["user_id"].to(device), batch["item_id"].to(device), batch["label"].to(device)
-                    p = best_model(u, i).squeeze().cpu()
-                    preds.extend(p.tolist())
-                    users.extend(u.cpu().tolist())
-                    items.extend(i.cpu().tolist())
-                    labels.extend(l.cpu().tolist())
-
-        rev_user_map = {v: k for k, v in user_map.items()}
-        rev_item_map = {v: k for k, v in item_map.items()}
-        user_names = [rev_user_map.get(uid, uid) for uid in users]
-        item_names = [rev_item_map.get(iid, iid) for iid in items]
-
-        df = pd.DataFrame({"user_id": user_names, "item_id": item_names, "label": labels, "pred": preds})
-        pred_dir = os.path.join(run_dir, f"predictions")
-        os.makedirs(pred_dir, exist_ok=True)
-        out_path = os.path.join(pred_dir, f"{stage}_predictions.csv")
-        df.to_csv(out_path, index=False)
-        print(f"💾 {stage} predictions saved to {out_path}")
-        return df
+    def on_train_epoch_start(self):
+        """Resample negatives in the training dataset at the start of every epoch."""
+        train_loader = self.trainer.train_dataloader
+        if train_loader is not None:
+            ds = getattr(train_loader, "dataset", None)
+            if ds is not None and hasattr(ds, "resample"):
+                ds.resample()
+                print("🔄 Resampled negatives for new epoch")
 
 
 # -----------------------
@@ -164,6 +119,12 @@ class NCFRecLightning(BaseRecLightning):
         self.test_outputs.append(
             {"user": batch["user_id"].cpu(), "item": batch["item_id"].cpu(), "label": batch["label"].cpu()}
         )
+    
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        """Called by trainer.predict"""
+        user = batch["user_id"].to(self.device)
+        item = batch["item_id"].to(self.device)
+        return self(user, item).squeeze()
 
     def on_validation_epoch_end(self):
         num_items = self.model.item_emb.num_embeddings
@@ -207,6 +168,11 @@ class GraphRecLightning(BaseRecLightning):
         self.test_outputs.append(
             {"user": batch.edge_label_index[0].cpu(), "item": batch.edge_label_index[1].cpu(), "label": batch.edge_label.cpu()}
         )
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        """Called by trainer.predict"""
+        batch = batch.to(self.device)
+        return self(batch).squeeze()
 
     def on_validation_epoch_end(self):
         num_items = self.model.embeddings[self.model.pair_dst_type].num_embeddings

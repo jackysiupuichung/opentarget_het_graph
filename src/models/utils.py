@@ -142,13 +142,6 @@ def initialise_trainer(cfg, run_dir):
 
 
 def collate_variable(batch):
-    collated = {}
-    for key in batch[0]:
-        if key == "neg_items":
-            collated[key] = pad_sequence([d[key] for d in batch],
-                                         batch_first=True,
-                                         padding_value=-1)
-        else:
-            collated[key] = torch.stack([d[key] for d in batch])
-    return collated
+    return {k: torch.stack([d[k] for d in batch]) for k in batch[0]}
+
 

@@ -18,8 +18,7 @@ data:
 model:
   name: ncf        # options: [ncf, graph]
   embed_dim: 64
-  loss_type: bpr   # [bce, mse, bpr]
-  num_neg: 5
+  loss_type: mse   # [bce, mse]
   supervision_src_type: diseases
   supervision_dst_type: targets
   supervision_relation_type: clinical_trial
