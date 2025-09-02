@@ -1,0 +1,53 @@
+# configs/experiment.yaml
+
+# ========================
+# Data settings
+# ========================
+data:
+  parquet: data/kg_output/edges/sourceId=chembl.parquet
+  cutoff: 2015
+  horizon: 5
+  cold_start_file: data/cold_start_diseases.csv
+  graph: data/kg_output/hetero_graph_2015_5.pt
+  disease_nodes: data/kg_output/nodes/diseases.parquet   # users
+  target_nodes: data/kg_output/nodes/targets.parquet     # items
+
+# ========================
+# Model settings
+# ========================
+model:
+  name: gat
+  hidden_dim: 256
+  num_layers: 2
+  heads: 4
+  dropout: 0.2
+  aggr: sum            # or mean
+  concat_heads: false  # keep output size = hidden_dim
+  residual: true
+  layer_norm: true
+  embedding_dim: 256   # used if a node type lacks features
+  mlp_hidden: [256, 128]  # MLP for link prediction
+  loss_type: mse
+  supervision_src_type: diseases
+  supervision_dst_type: targets
+  supervision_relation_type: clinical_trial
+
+
+# ========================
+# Training settings
+# ========================
+train:
+  epochs: 10
+  batch_size: 256
+  lr: 1e-3
+  seed: 42
+  num_neg: 1
+
+
+# ========================
+# Evaluation settings
+# ========================
+eval:
+  topk: [10, 50]
+  metrics: ["Recall", "NDCG"]
+  valid_metric: NDCG@10
