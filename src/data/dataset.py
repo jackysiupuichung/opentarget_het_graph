@@ -52,6 +52,10 @@ class InteractionDataset(Dataset):
         self.rng = np.random.default_rng(seed)
 
         self.all_interactions = all_interactions if all_interactions else {}
+        self.neg_items = {
+            u: np.setdiff1d(np.arange(self.num_items), list(pos))
+            for u, pos in self.all_interactions.items()
+}
         # This gets all the users that have positive interaction before temporal split
         self.users_in_df = set(self.user_map[str(u)] for u in self.df["user_id"].astype(str))
         self.sampler = UniformNegSampler(self.num_items, num_neg, seed) if num_neg > 0 else None

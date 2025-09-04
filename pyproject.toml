@@ -3,7 +3,7 @@ name = "opentarget-het-graph"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "numpy==2.3.2",
     "pandas==2.3.2",
@@ -13,4 +13,23 @@ dependencies = [
     "pyyaml==6.0.2",
     "six==1.17.0",
     "tzdata==2025.2",
+    "torch>=2.7.0",
+    "torchvision>=0.22.0",
+    "torch-geometric>=2.6.1",
+    "pytorch-lightning>=2.5.4",
+    "omegaconf>=2.3.0",
 ]
+
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu118", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cu118", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true

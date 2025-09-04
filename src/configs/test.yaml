@@ -4,15 +4,15 @@
 # Data settings
 # ========================
 data:
-  parquet: data/kg_output/edges/sourceId=chembl.parquet
+  parquet: /data/scratch/bty414/opentarget_evidences/kg_output/edges/sourceId=chembl.parquet
   cutoff: 2015
   horizon: 5
-  cold_start_file: data/cold_start_diseases.csv
-  graph_file: kg_output/hetero_graph_2010_5.pt
-  node_dir: data/kg_output/nodes/
-  edge_dir: data/kg_output/edges/
-  disease_nodes: data/kg_output/nodes/diseases.parquet   # users
-  target_nodes: data/kg_output/nodes/targets.parquet     # items
+  cold_start_file: /data/scratch/bty414/opentarget_evidences/cold_start_diseases.csv
+  graph_file: /data/scratch/bty414/opentarget_evidences/kg_output/hetero_graph_2010_5.pt
+  node_dir: /data/scratch/bty414/opentarget_evidences/kg_output/nodes/
+  edge_dir: /data/scratch/bty414/opentarget_evidences/kg_output/edges/
+  disease_nodes: /data/scratch/bty414/opentarget_evidences/kg_output/nodes/diseases.parquet   # users
+  target_nodes: /data/scratch/bty414/opentarget_evidences/kg_output/nodes/targets.parquet     # items
 
 # ========================
 # Model settings

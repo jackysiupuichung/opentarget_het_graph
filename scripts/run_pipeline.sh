@@ -1,16 +1,22 @@
 #!/bin/bash
+#$ -pe smp 4
+#$ -l h_vmem=8G
+#$ -l h_rt=1:0:0
+#$ -cwd
+#$ -j y
+
 set -euo pipefail
 
 # activate venv (adjust path if needed)
 source .venv/bin/activate
 
 # === Config ===
-INPUT="data/evidenceDated_subset"
+INPUT="/data/scratch/bty414/opentarget_evidences/evidenceDated"
 NODE_SCHEMA="config/node_schema.yaml"
 EDGE_SCHEMA="config/edge_schema.yaml"
 STATIC_EDGE_SCHEMA="config/static_edge_schema.yaml"
-NODE_OUTPUT="data/kg_output/nodes"
-EDGE_OUTPUT="data/kg_output/edges"
+NODE_OUTPUT="/data/scratch/bty414/opentarget_evidences/kg_output/nodes"
+EDGE_OUTPUT="/data/scratch/bty414/opentarget_evidences/kg_output/edges"
 
 # === Run pipeline ===
 echo "🚀 Running Knowledge Graph pipeline..."
