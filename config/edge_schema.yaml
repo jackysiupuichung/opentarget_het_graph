@@ -1,167 +1,180 @@
+# TODO: what about edges with no temporal information? e.g. intogen, progeny (supp file temporal trend)
+
 sourceId=cancer_biomarkers:
-  source: targetId
-  target: diseaseId
+  name: cancer_biomarker
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=chembl:
-  - source: diseaseId
-    target: targetId
+  - name: chembl
+    sourceId: diseaseId
+    targetId: targetId
     relation_name: clinical_trial
-    props: [source_type=constant:diseases, target_type=constant:targets, datasourceId, score, year, id]
+    props: [source_type=constant:disease, target_type=constant:target, datasourceId, score, year, id]
 
-  - source: drugId
-    target: targetId
+  - name: chembl
+    sourceId: drugId
+    targetId: targetId
     relation_name: modulated_by
-    props: [source_type=constant:molecule, target_type=constant:targets, datasourceId, score, year, id]
+    props: [source_type=constant:molecule, target_type=constant:target, datasourceId, score, year, id]
 
 sourceId=reactome:
-  - source: targetId
-    target: diseaseId
+  - name: reactome
+    sourceId: targetId
+    targetId: diseaseId
     relation: datatypeId
-    props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
-    
-  - source: targetId
-    target: pathways.id
-    relation_name: involved_in
-    props: [source_type=constant:targets, target_type=constant:reactome, datasourceId, score, year, id]
+    props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-  - source: diseaseId
-    target: pathways.id
+  - name: reactome
+    sourceId: targetId
+    targetId: pathways.id
+    relation_name: involved_in
+    props: [source_type=constant:target, target_type=constant:reactome, datasourceId, score, year, id]
+
+  - name: reactome
+    sourceId: diseaseId
+    targetId: pathways.id
     relation: datatypeId
     relation_name: associated_with
-    props: [source_type=constant:diseases, target_type=constant:reactome, datasourceId, score, year, id]
+    props: [source_type=constant:disease, target_type=constant:reactome, datasourceId, score, year, id]
 
 sourceId=clingen:
-  source: targetId
-  target: diseaseId
+  name: clingen
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=eva:
-  source: targetId
-  target: diseaseId
+  name: eva
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=gene_burden:
-  source: targetId
-  target: diseaseId
+  name: gene_burden
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=intogen:
-  source: targetId
-  target: diseaseId
-  relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+# sourceId=intogen:
+#   name: intogen
+#   sourceId: targetId
+#   targetId: diseaseId
+#   relation: datatypeId
+#   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=slapenrich:
-  - source: targetId
-    target: diseaseId
+  
+  - sourceId: targetId
+    targetId: diseaseId
     relation: datatypeId
-    props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+    props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-  - source: targetId
-    target: pathways.id
+  - sourceId: targetId
+    targetId: pathways.id
     relation_name: involved_in
-    props: [source_type=constant:targets, target_type=constant:reactome, datasourceId, score, year, id]
+    props: [source_type=constant:target, target_type=constant:reactome, datasourceId, score, year, id]
 
-  - source: diseaseId
-    target: pathways.id
+  - sourceId: diseaseId
+    targetId: pathways.id
     relation_name: associated_with
     props: [source_type=constant:disease, target_type=constant:reactome, datasourceId, score, year, id]
 
 sourceId=crispr:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=eva_somatic:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=genomics_england:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=orphanet:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=sysbio:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=cancer_gene_census:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=crispr_screen:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, cellType, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, cellType, datasourceId, score, year, id]
 
 sourceId=expression_atlas:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=progeny:
-  - source: targetId
-    target: diseaseId
-    relation: datatypeId
-    props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+# sourceId=progeny:
+#   - sourceId: targetId
+#     targetId: diseaseId
+#     relation: datatypeId
+#     props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-  - source: targetId
-    target: pathways.id
-    relation_name: involved_in
-    props: [source_type=constant:targets, target_type=constant:reactome, datasourceId, score, year, id]
+#   - sourceId: targetId
+#     targetId: pathways.id
+#     relation_name: involved_in
+#     props: [source_type=constant:target, target_type=constant:reactome, datasourceId, score, year, id]
 
-  - source: diseaseId
-    target: pathways.id
-    relation: datatypeId
-    props: [source_type=constant:disease, target_type=constant:reactome, datasourceId, score, year, id]
+#   - sourceId: diseaseId
+#     targetId: pathways.id
+#     relation: datatypeId
+#     props: [source_type=constant:disease, target_type=constant:reactome, datasourceId, score, year, id]
 
 sourceId=uniprot_literature:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=europepmc:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=gene2phenotype:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=impc:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=uniprot_variants:
-  source: targetId
-  target: diseaseId
+  sourceId: targetId
+  targetId: diseaseId
   relation: datatypeId
-  props: [source_type=constant:targets, target_type=constant:diseases, datasourceId, score, year, id]
+  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]

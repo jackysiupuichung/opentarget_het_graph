@@ -6,15 +6,16 @@ from glob import glob
 import traceback
 
 
-REQUIRED_EDGE_COLS = ["source", "target", "source_type", "target_type", "relation", "datasourceId", "score", "year"]
+REQUIRED_EDGE_COLS = ["sourceId", "targetId", "source_type", "target_type", "relation", "datasourceId", "score", "timestamp"]
 YEAR_PRIORITY = ["curationYear", "studyYear", "publicationYear", "studyStartDate"]
 
 
 class BaseParser:
-    def __init__(self, root_dir: str, schema_file: str, output_dir: str, node_store: None):
+    def __init__(self, root_dir: str, schema_file: str, output_dir: str, node_store: None, static: bool = False):
         self.root_dir = root_dir
         self.output_dir = output_dir
         self.node_store = node_store or {}  # used by EdgeParser validation
+        self.static = False # used by EdgeParser for timestamp handling
         with open(schema_file, "r") as f:
             self.schema = yaml.safe_load(f)
         os.makedirs(self.output_dir, exist_ok=True)
@@ -29,9 +30,9 @@ class BaseParser:
 
     def parse(self):
         """
-        Parse all schema-defined sources into one parquet per source.
+        Parse all schema-defined sources into one parquet per sourceId.
         - If schema entry is a dict → single spec
-        - If schema entry is a list → multiple specs (relations) for same source
+        - If schema entry is a list → multiple specs (relations) for same sourceId
         """
         all_data = {}
 
@@ -163,7 +164,7 @@ class EdgeParser(BaseParser):
         return raw_val
 
     @staticmethod
-    def _add_props(edge, row, props):
+    def _add_props(edge, row, props, static=False):
         # Add all props first
         for p in props:
             if isinstance(p, str) and "=" in p and "constant:" in p:
@@ -177,33 +178,35 @@ class EdgeParser(BaseParser):
                 if isinstance(val, (list, dict)):
                     val = str(val)
                 edge[p] = val
+                
+        if static:
+            # Static edges → no timestamps at all
+            edge["timestamp"] = np.nan
+            return edge
 
-        # Handle year
-        if "year" in props:
-            # Dynamic edges → pick best year candidate
+        # Handle timestamp
+        if "timestamp" in props:
+            # Dynamic edges → pick best timestamp candidate
             for col in YEAR_PRIORITY:
                 if col in row and pd.notnull(row[col]):
                     if col == "studyStartDate":
                         try:
-                            edge["year"] = pd.to_datetime(row[col], errors="coerce").year
+                            edge["timestamp"] = pd.to_datetime(row[col], errors="coerce").timestamp
                             return edge
                         except Exception:
                             continue
                     else:
-                        edge["year"] = row[col]
+                        edge["timestamp"] = row[col]
                         return edge
-            edge["year"] = np.nan  # fallback if no usable column
-        else:
-            # Static edges → force 0
-            edge["year"] = 0
+            edge["timestamp"] = np.nan  # fallback if no usable column
 
         return edge
 
 
 
     def apply_spec(self, df, spec, name):
-        src_col = spec["source"]
-        tgt_col = spec["target"]
+        src_col = spec["sourceId"]
+        tgt_col = spec["targetId"]
 
         # Decide relation value
         if "relation" in spec:
@@ -224,11 +227,11 @@ class EdgeParser(BaseParser):
                 expanded_edges = []
                 for _, row in df.iterrows():
                     edge = {
-                        "source": row[src_col],
-                        "target": row[tgt_col],
+                        "sourceId": row[src_col],
+                        "targetId": row[tgt_col],
                         "relation": row[relation_value] if relation_is_column else relation_value,
                     }
-                    expanded_edges.append(self._add_props(edge, row, props))
+                    expanded_edges.append(self._add_props(edge, row, props, static=self.static))
 
                 out = pd.DataFrame(expanded_edges)
                 return out
@@ -246,18 +249,18 @@ class EdgeParser(BaseParser):
                             if not t_val:
                                 continue
                             edge = {
-                                "source": row[src_col],
-                                "target": t_val,
+                                "sourceId": row[src_col],
+                                "targetId": t_val,
                                 "relation": row[relation_value] if relation_is_column else relation_value,
                             }
                             expanded_edges.append(self._add_props(edge, row, props))
 
                 out = pd.DataFrame(expanded_edges)
-                # if "year" not in out.columns:
-                #     out["year"] = 0
+                # if "timestamp" not in out.columns:
+                #     out["timestamp"] = 0
                 return out
 
-        # === Case 3: List-like target expansion ===
+        # === Case 3: List-like targetId expansion ===
         if tgt_col in df.columns:
             expanded_edges = []
             for _, row in df.iterrows():
@@ -269,8 +272,8 @@ class EdgeParser(BaseParser):
                     # --- Case 3a: plain values (string, int, etc.)
                     if not isinstance(t, dict):
                         edge = {
-                            "source": row[src_col],
-                            "target": t,
+                            "sourceId": row[src_col],
+                            "targetId": t,
                             "relation": row[relation_value] if relation_is_column else relation_value,
                         }
                         expanded_edges.append(self._add_props(edge, row, props))
@@ -278,29 +281,29 @@ class EdgeParser(BaseParser):
                     # --- Case 3b: dict with "id" (GO-style annotations)
                     elif "id" in t:
                         edge = {
-                            "source": row[src_col],
-                            "target": t["id"],
+                            "sourceId": row[src_col],
+                            "targetId": t["id"],
                             "relation": row[relation_value] if relation_is_column else relation_value,
                         }
                         expanded_edges.append(self._add_props(edge, row, props))
             if expanded_edges:
                 return pd.DataFrame(expanded_edges)
 
-        raise ValueError(f"Unsupported target {tgt_col} for {name}")
+        raise ValueError(f"Unsupported targetId {tgt_col} for {name}")
     
 
 
 
     def output_name(self, name, spec):
-        return name  # one parquet per source dir
+        return name  # one parquet per sourceId dir
     
     def validate(self, df, spec, name):
         """Ensure sources/targets exist in node_store."""
         if not self.node_store:
             return df  # nothing to validate against
 
-        src_valid = df["source"].astype(str).isin(set.union(*self.node_store.values()))
-        tgt_valid = df["target"].astype(str).isin(set.union(*self.node_store.values()))
+        src_valid = df["sourceId"].astype(str).isin(set.union(*self.node_store.values()))
+        tgt_valid = df["targetId"].astype(str).isin(set.union(*self.node_store.values()))
 
         df = df[src_valid & tgt_valid]
         return df
@@ -326,7 +329,7 @@ class EdgeParser(BaseParser):
         #     if "id" in dropped.columns:
         #         print("   First 5 dropped IDs:", dropped["id"].head(5).tolist())
         #     else:
-        #         cols_to_show = [c for c in ["source", "target", "relation"] if c in dropped.columns]
+        #         cols_to_show = [c for c in ["sourceId", "targetId", "relation"] if c in dropped.columns]
         #         print("   First 5 dropped rows:")
         #         print(dropped[cols_to_show].head(5).to_string(index=False))
 

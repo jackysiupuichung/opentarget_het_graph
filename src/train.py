@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 
 
 from src.data.utils import supervision_edge_temporal_and_cold_split, attach_node_features
-from src.pipeline.build_hetero_graph import load_nodes, load_edges, get_most_evidented_edges, build_heterodata_with_cold_split
+from src.pipeline.build_progression_graph import load_nodes, load_edges, get_most_evidented_edges, build_heterodata_with_cold_split
 from src.data.dataset import InteractionDataset
 from src.models.base_lightning import NCFRecLightning, GraphRecLightning
 from src.models.ncf import NCF

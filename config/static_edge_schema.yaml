@@ -1,18 +1,20 @@
 interactionEvidence:
-  source: targetA
-  target: targetB
+  name: protein_protein_interaction
+  sourceId: targetA
+  targetId: targetB
   relation_name: interacts_with
   props: [
     id,
     datasourceId=constant:interactionEvidence,
     score=constant:1.0,
-    source_type=constant:targets,
-    target_type=constant:targets
+    source_type=constant:target,
+    target_type=constant:target
   ]
 
 reactome:
-  source: id
-  target: parents
+  name: reactome_pathway
+  sourceId: id
+  targetId: parents
   relation_name: is_subpathway_of
   props: [
     id,
@@ -23,25 +25,27 @@ reactome:
   ]
 
 diseases:
-  source: id
-  target: parents
+  name: disease_ontology
+  sourceId: id
+  targetId: parents
   relation_name: is_subtype_of
   props: [
     id,
     datasourceId=constant:disease_ontology,
     score=constant:1.0,
-    source_type=constant:diseases,
-    target_type=constant:diseases
+    source_type=constant:disease,
+    target_type=constant:disease
   ]
 
 targets:
-  source: id
-  target: go
+  name: gene_ontology
+  sourceId: id
+  targetId: go
   relation_name: gene_ontology_annotation
   props: [
     id,
     datasourceId=constant:gene_ontology,
     score=constant:1.0,
-    source_type=constant:targets,
+    source_type=constant:target,
     target_type=constant:go
   ]

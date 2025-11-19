@@ -10,11 +10,4 @@ TEST_HORIZON=5
 RELATION_MODE="datatype"
 OUT="data/kg_output/hetero_graph_${CUTOFF}_${TEST_HORIZON}.pt"
 
-echo "🚀 Building PyG HeteroData..."
-python -m src.pipeline.build_hetero_graph \
-  --edge-dir "$EDGE_DIR" \
-  --node-dir "$NODE_DIR" \
-  --cutoff "$CUTOFF" \
-  --test-horizon "$TEST_HORIZON" \
-  --relation-mode "$RELATION_MODE" \
-  --out "$OUT"
+python -m src.pipeline.build_progression_graph

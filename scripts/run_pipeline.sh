@@ -11,12 +11,13 @@ set -euo pipefail
 source .venv/bin/activate
 
 # === Config ===
-INPUT="/data/scratch/bty414/opentarget_evidences/evidenceDated"
+INPUT="data/evidenceDated_subset"
 NODE_SCHEMA="config/node_schema.yaml"
 EDGE_SCHEMA="config/edge_schema.yaml"
 STATIC_EDGE_SCHEMA="config/static_edge_schema.yaml"
-NODE_OUTPUT="/data/scratch/bty414/opentarget_evidences/kg_output/nodes"
-EDGE_OUTPUT="/data/scratch/bty414/opentarget_evidences/kg_output/edges"
+NODE_OUTPUT="data/kg_output/nodes"
+EDGE_OUTPUT="data/kg_output/edges"
+STATIC_EDGE_OUTPUT="data/kg_output/static_edges"
 
 # === Run pipeline ===
 echo "🚀 Running Knowledge Graph pipeline..."
@@ -26,4 +27,5 @@ python -m src.pipeline.kg_pipeline \
   --edge-schema "$EDGE_SCHEMA" \
   --static-edge-schema "$STATIC_EDGE_SCHEMA" \
   --node-output "$NODE_OUTPUT" \
-  --edge-output "$EDGE_OUTPUT"
+  --edge-output "$EDGE_OUTPUT" \
+  --static-edge-output "$STATIC_EDGE_OUTPUT"
