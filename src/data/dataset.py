@@ -2,7 +2,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-from torch_geometric.loader import LinkNeighborLoader
+from torch_geometric.loader import LinkNeighborLoader, HGTLoader
 
 from src.models.utils import collate_variable
 
@@ -22,7 +22,6 @@ class UniformNegSampler:
             size=min(self.num_neg, len(candidates)),
             replace=False if len(candidates) >= self.num_neg else True
         )
-
 
 class InteractionDataset(Dataset):
     """
@@ -195,6 +194,42 @@ class InteractionDataset(Dataset):
             batch_size=batch_size,
             shuffle=shuffle,
         )
+        
+    def build_HGT_loader(
+        self,
+        hetero_graph,
+        batch_size=1024,
+        num_neighbors=[15, 10],
+        shuffle=True
+    ):
+
+        """
+        Build graph loader using HGTLoader instead of LinkNeighborLoader.
+        This ensures schema-aware, type-balanced sampling.
+        """
+
+        edge_type = ("diseases", "clinical_trial", "targets")
+        assert edge_type in hetero_graph.edge_types, \
+            f"{edge_type} missing in graph {hetero_graph.edge_types}"
+
+        users = torch.as_tensor(self.samples[:, 0], dtype=torch.long)
+        items = torch.as_tensor(self.samples[:, 1], dtype=torch.long)
+        labels = torch.as_tensor(self.samples[:, 2], dtype=torch.float)
+
+        # edge_label_index for supervision
+        edge_label_index = torch.stack([users, items], dim=0)
+
+        loader = HGTLoader(
+            data=hetero_graph,
+            num_samples={key: [num_neighbors] * 2 for key in hetero_graph.edge_types},
+            # supervision edges
+            input_nodes=(edge_type[0], users),  # starting from diseases
+            batch_size=batch_size,
+            shuffle=shuffle,
+        )
+
+        return loader
+
     # -----------------------
     # Info
     # -----------------------

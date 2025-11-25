@@ -24,8 +24,8 @@ from datetime import timedelta
 # ----------------------------------------
 # CONFIGURATION
 # ----------------------------------------
-EDGE_DIR = "data/kg_output/edges"
-OUT_DIR = "data/progression_graph"
+EDGE_DIR = "/data/scratch/bty414/opentarget_evidences/23.06/kg_output/edges"
+OUT_DIR = "/data/scratch/bty414/opentarget_evidences/23.06/progression_graph"
 DATASOURCE_HARMONIC_NOVELTY_FILE = f"{OUT_DIR}/datasource_harmonic_novelty.parquet"
 DATATYPE_HARMONIC_NOVELTY_FILE = f"{OUT_DIR}/datatype_harmonic_novelty.parquet"
 os.makedirs(OUT_DIR, exist_ok=True)

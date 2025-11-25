@@ -8,7 +8,7 @@ diseases:
   name: diseaseFromSource
   props: [therapeuticAreas]
 
-molecule:
+drug_molecule:
   id: id
   props: [maximumClinicalTrialPhase]
 

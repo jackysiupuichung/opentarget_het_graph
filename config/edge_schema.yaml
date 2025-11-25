@@ -1,10 +1,11 @@
 # TODO: what about edges with no temporal information? e.g. intogen, progeny (supp file temporal trend)
+# TODO: for edges with multiple relations are we duplicating the edges correctly?
 
 sourceId=cancer_biomarkers:
   name: cancer_biomarker
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: somatic_mutation
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=chembl:
@@ -24,7 +25,7 @@ sourceId=reactome:
   - name: reactome
     sourceId: targetId
     targetId: diseaseId
-    relation: datatypeId
+    relation_name: affected_pathway
     props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
   - name: reactome
@@ -36,7 +37,6 @@ sourceId=reactome:
   - name: reactome
     sourceId: diseaseId
     targetId: pathways.id
-    relation: datatypeId
     relation_name: associated_with
     props: [source_type=constant:disease, target_type=constant:reactome, datasourceId, score, year, id]
 
@@ -44,35 +44,35 @@ sourceId=clingen:
   name: clingen
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=eva:
   name: eva
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=gene_burden:
   name: gene_burden
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 # sourceId=intogen:
 #   name: intogen
 #   sourceId: targetId
 #   targetId: diseaseId
-#   relation: datatypeId
+#   relation_name: somatic_mutation
 #   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=slapenrich:
   
   - sourceId: targetId
     targetId: diseaseId
-    relation: datatypeId
+    relation_name: affected_pathway
     props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
   - sourceId: targetId
@@ -88,55 +88,55 @@ sourceId=slapenrich:
 sourceId=crispr:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: datatypeId
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=eva_somatic:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: datatypeId
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=genomics_england:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: datatypeId
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=orphanet:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: datatypeId
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=sysbio:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: datatypeId
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=cancer_gene_census:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: datatypeId
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=crispr_screen:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: datatypeId
   props: [source_type=constant:target, target_type=constant:disease, cellType, datasourceId, score, year, id]
 
 sourceId=expression_atlas:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: datatypeId
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 # sourceId=progeny:
 #   - sourceId: targetId
 #     targetId: diseaseId
-#     relation: datatypeId
+#     relation_name: affected_pathway
 #     props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 #   - sourceId: targetId
@@ -146,35 +146,35 @@ sourceId=expression_atlas:
 
 #   - sourceId: diseaseId
 #     targetId: pathways.id
-#     relation: datatypeId
+#     relation_name: datatypeId
 #     props: [source_type=constant:disease, target_type=constant:reactome, datasourceId, score, year, id]
 
 sourceId=uniprot_literature:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=europepmc:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: literature
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=gene2phenotype:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=impc:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: animal_model
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
 sourceId=uniprot_variants:
   sourceId: targetId
   targetId: diseaseId
-  relation: datatypeId
+  relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]

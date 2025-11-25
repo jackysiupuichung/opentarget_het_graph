@@ -11,13 +11,13 @@ set -euo pipefail
 source .venv/bin/activate
 
 # === Config ===
-INPUT="data/evidenceDated_subset"
+INPUT="/data/scratch/bty414/opentarget_evidences/23.06/evidenceDated"
 NODE_SCHEMA="config/node_schema.yaml"
 EDGE_SCHEMA="config/edge_schema.yaml"
 STATIC_EDGE_SCHEMA="config/static_edge_schema.yaml"
-NODE_OUTPUT="data/kg_output/nodes"
-EDGE_OUTPUT="data/kg_output/edges"
-STATIC_EDGE_OUTPUT="data/kg_output/static_edges"
+NODE_OUTPUT="/data/scratch/bty414/opentarget_evidences/23.06/kg_output/nodes"
+EDGE_OUTPUT="/data/scratch/bty414/opentarget_evidences/23.06/kg_output/edges"
+STATIC_EDGE_OUTPUT="/data/scratch/bty414/opentarget_evidences/23.06/kg_output/static_edges"
 
 # === Run pipeline ===
 echo "🚀 Running Knowledge Graph pipeline..."

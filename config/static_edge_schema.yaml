@@ -1,11 +1,11 @@
-interactionEvidence:
+interaction_evidence:
   name: protein_protein_interaction
   sourceId: targetA
   targetId: targetB
   relation_name: interacts_with
   props: [
     id,
-    datasourceId=constant:interactionEvidence,
+    datasourceId=constant:protein_protein_interaction,
     score=constant:1.0,
     source_type=constant:target,
     target_type=constant:target
