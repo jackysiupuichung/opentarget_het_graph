@@ -41,7 +41,7 @@ targets:
   name: gene_ontology
   sourceId: id
   targetId: go.id
-  relation_name: gene_ontology_annotation
+  relation_name: has_function_in
   props: [
     id,
     datasourceId=constant:gene_ontology,
