@@ -194,8 +194,6 @@ class EdgeParser(BaseParser):
 
         return edge
 
-
-
     def apply_spec(self, df, spec, name):
         src_col = spec["sourceId"]
         tgt_col = spec["targetId"]
@@ -280,8 +278,6 @@ class EdgeParser(BaseParser):
         raise ValueError(f"Unsupported targetId {tgt_col} for {name}")
     
 
-
-
     def output_name(self, name, spec):
         return name  # one parquet per sourceId dir
     
@@ -295,7 +291,35 @@ class EdgeParser(BaseParser):
 
         df = df[src_valid & tgt_valid]
         return df
-    
+
+    def _deduplicate_static_edges(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        undirected de-duplication for static edges.
+        Assumes one relation + datasource per file.
+        """
+        if not self.static or df.empty:
+            return df
+
+        # Convert once for stable ordering
+        src = df["sourceId"].astype(str).values
+        tgt = df["targetId"].astype(str).values
+
+        # Canonical ordering (vectorised, no DataFrame ops)
+        df["sourceId"] = np.minimum(src, tgt)
+        df["targetId"] = np.maximum(src, tgt)
+
+        before = len(df)
+        df = df.drop_duplicates(
+            subset=["sourceId", "targetId"],
+            keep="first"
+        )
+        after = len(df)
+
+        print(f"🔁 Static edge de-duplication: {before:,} → {after:,}")
+        return df
+
+
+
     def serialise(self, df, out_path):
         """
         Save edges to parquet while respecting static/dynamic schemas.
@@ -319,6 +343,12 @@ class EdgeParser(BaseParser):
         if missing_cols:
             print(f"⚠️ Skipping save for {out_path}, missing columns: {missing_cols}")
             return
+
+        # -----------------------------------
+        # De-duplicate static edges
+        # -----------------------------------
+        # if self.static:
+        #     df = self._deduplicate_static_edges(df)
 
         # -----------------------------------
         # Drop rows missing required fields

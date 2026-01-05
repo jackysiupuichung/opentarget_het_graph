@@ -11,7 +11,8 @@ set -euo pipefail
 source .venv/bin/activate
 
 # === Config ===
-INPUT="data/evidenceDated_subset/23.06"
+# INPUT="data/evidenceDated_subset/23.06"
+INPUT="/data/scratch/bty414/opentarget_evidences/23.06/evidenceDated"
 NODE_SCHEMA="config/node_schema.yaml"
 EDGE_SCHEMA="config/edge_schema.yaml"
 STATIC_EDGE_SCHEMA="config/static_edge_schema.yaml"

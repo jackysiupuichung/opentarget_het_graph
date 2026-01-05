@@ -27,17 +27,18 @@ from src.parsers.chembl_trial_expander import expand_chembl_clinical_trials
 # ----------------------------------------
 # CONFIGURATION
 # ----------------------------------------
-# EDGE_DIR = "/data/scratch/bty414/opentarget_evidences/23.06/kg_output/edges"
-# OUT_DIR = "/data/scratch/bty414/opentarget_evidences/23.06/progression_graph"
-EDGE_DIR = "/Users/pchungsiu/Documents/opentarget_het_graph/data/evidenceDated_subset/23.06/kg_output/edges"
-STATIC_EDGE_DIR = "/Users/pchungsiu/Documents/opentarget_het_graph/data/evidenceDated_subset/23.06/kg_output/static_edges"
-OUT_DIR = "/Users/pchungsiu/Documents/opentarget_het_graph/data/evidenceDated_subset/23.06/kg_output/progression_graph"
+EDGE_DIR = "/data/scratch/bty414/opentarget_evidences/23.06/kg_output/edges"
+STATIC_EDGE_DIR = "/data/scratch/bty414/opentarget_evidences/23.06/kg_output/static_edges"
+OUT_DIR = "/data/scratch/bty414/opentarget_evidences/23.06/progression_graph"
+# EDGE_DIR = "/Users/pchungsiu/Documents/opentarget_het_graph/data/evidenceDated_subset/23.06/kg_output/edges"
+# STATIC_EDGE_DIR = "/Users/pchungsiu/Documents/opentarget_het_graph/data/evidenceDated_subset/23.06/kg_output/static_edges"
+# OUT_DIR = "/Users/pchungsiu/Documents/opentarget_het_graph/data/evidenceDated_subset/23.06/kg_output/progression_graph"
 DATASOURCE_HARMONIC_FILE = f"{OUT_DIR}/datasource_harmonic.parquet"
 DATATYPE_HARMONIC_FILE = f"{OUT_DIR}/datatype_harmonic.parquet"
 STATIC_SUPP_FILE = f"{OUT_DIR}/static_edges.parquet"
 os.makedirs(OUT_DIR, exist_ok=True)
 
-FIRST_YEAR = 2010
+FIRST_YEAR = 2000
 LAST_YEAR = 2025
 YEARS = np.arange(FIRST_YEAR, LAST_YEAR + 1)
 MAX_HARMONIC = 1.644  # theoretical max sum of 1/i^2
@@ -345,7 +346,6 @@ def load_static_evidence():
         if fname.endswith(".parquet"):
             df = pd.read_parquet(f"{STATIC_EDGE_DIR}/{fname}").copy()
             df["relation_key"] = df["datasourceId"] + "::" + df["relation"]
-            # df["score"] = 1.0   # constant support weight
             keep = ["sourceId", "targetId", "source_type", "target_type",
                     "relation", "datasourceId", "score", "year", "relation_key"]
             dfs.append(df[keep])
@@ -358,41 +358,66 @@ def load_static_evidence():
 # 1.2. SANITY CHECK: UNIQUE NODES + UNIQUE EDGES
 # ----------------------------------------------------
 def inspect_graph(evd):
-    print("\n================ GRAPH SUMMARY ================\n")
+    print("\n================ EVIDENCE SUMMARY ================\n")
 
-    # Unique nodes
-    diseases = set(evd[evd["source_type"] == "disease"]["sourceId"]) | \
-               set(evd[evd["target_type"] == "disease"]["targetId"])
+    # ---------------------------------------------------------
+    # 1. COLLECT ALL NODES BY TYPE (DYNAMIC)
+    # ---------------------------------------------------------
+    node_type_map = {}
 
-    targets = set(evd[evd["source_type"] == "target"]["sourceId"]) | \
-              set(evd[evd["target_type"] == "target"]["targetId"])
+    # From source side
+    for node, t in evd[["sourceId", "source_type"]].drop_duplicates().itertuples(index=False):
+        node_type_map.setdefault(t, set()).add(node)
 
-    other_nodes = set(evd["sourceId"]) | set(evd["targetId"])
-    other_nodes = other_nodes - diseases - targets
+    # From target side
+    for node, t in evd[["targetId", "target_type"]].drop_duplicates().itertuples(index=False):
+        node_type_map.setdefault(t, set()).add(node)
 
-    print(f"🧬 Unique disease nodes    : {len(diseases)}")
-    print(f"🎯 Unique target nodes     : {len(targets)}")
-    print(f"📦 Other nodes (pathway, drug, GO, etc.) : {len(other_nodes)}")
-    print(f"🌐 Total unique nodes      : {len(set(evd['sourceId']) | set(evd['targetId']))}")
+    # ---------------------------------------------------------
+    # 2. PRINT SUMMARY OF EACH NODE TYPE
+    # ---------------------------------------------------------
+    total_unique_nodes = set(evd["sourceId"]) | set(evd["targetId"])
 
-    # Unique edges (as tuples)
+    for t, nodes in node_type_map.items():
+        print(f"🟦 Node type '{t}' : {len(nodes)}")
+
+    # Nodes that appear but have no explicit type (rare)
+    typed_nodes = set().union(*node_type_map.values()) if node_type_map else set()
+    untyped_nodes = total_unique_nodes - typed_nodes
+
+    if untyped_nodes:
+        print(f"⚠️ Untyped nodes found : {len(untyped_nodes)}")
+
+    print(f"\n🌐 Total unique nodes : {len(total_unique_nodes)}")
+
+    # ---------------------------------------------------------
+    # 3. UNIQUE EDGE COUNT
+    # ---------------------------------------------------------
     unique_edges = set(
         tuple(row)
-        for row in evd[["sourceId", "relation", "targetId"]].itertuples(index=False, name=None)
+        for row in evd[["sourceId", "relation", "targetId"]]
+        .itertuples(index=False, name=None)
     )
-    print(f"🔗 Total unique edges      : {len(unique_edges)}")
+    print(f"🔗 Total unique edges : {len(unique_edges)}")
 
-    # Relation statistics
+    # ---------------------------------------------------------
+    # 4. RELATION STATISTICS
+    # ---------------------------------------------------------
     print("\n📚 Edge counts per relation:")
     print(evd["relation"].value_counts())
 
-    # Datasource stats
+    # ---------------------------------------------------------
+    # 5. DATASOURCE STATISTICS
+    # ---------------------------------------------------------
     print("\n📦 Edge counts per datasource:")
     print(evd["datasourceId"].value_counts())
 
-    # Year coverage
+    # ---------------------------------------------------------
+    # 6. YEAR RANGE
+    # ---------------------------------------------------------
     print("\n📆 Year range:")
     print(f"Min year = {evd['year'].min()}, Max year = {evd['year'].max()}")
+
 
 
 # ----------------------------------------------------

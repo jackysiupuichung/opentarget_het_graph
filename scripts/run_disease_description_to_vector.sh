@@ -1,7 +1,7 @@
 #!/bin/bash
 #$ -pe smp 4
-#$ -l h_vmem=8G
-#$ -l h_rt=240:0:0
+#$ -l h_vmem=16G
+#$ -l h_rt=1:0:0
 #$ -cwd
 #$ -j y
 

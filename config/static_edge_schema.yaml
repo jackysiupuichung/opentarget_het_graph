@@ -6,7 +6,7 @@ interactionEvidence:
   props: [
     id,
     datasourceId=constant:protein_protein_interaction,
-    score=constant:1.0,
+    score=interactionScore,
     source_type=constant:target,
     target_type=constant:target
   ]
