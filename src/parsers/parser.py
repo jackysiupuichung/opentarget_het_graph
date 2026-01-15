@@ -96,54 +96,49 @@ class BaseParser:
 
     def parse(self):
         """
-        Parse all schema-defined sources into one parquet per sourceId.
-        - If schema entry is a dict → single spec
-        - If schema entry is a list → multiple specs (relations) for same sourceId
+        Parse all schema-defined sources.
         """
         all_data = {}
 
         for name, spec in self.schema.items():
-            print(f"📦 Parsing: {name}")
-            subdir_path = os.path.join(self.root_dir, name)
-            if not os.path.exists(subdir_path):
-                print(f"⚠️ No directory for {name}, skipping")
-                continue
-
+            print(f"📦 Processing schema entry: {name}")
+            
             # normalise spec to list
             specs = spec if isinstance(spec, list) else [spec]
+            
+            # Use explicit input_dir from the first spec if available, otherwise fallback to name
+            input_dir = specs[0].get("input_dir", name) if isinstance(specs[0], dict) else name
+            subdir_path = os.path.join(self.root_dir, input_dir)
 
-            dfs = []
-            num_rows = 0
+            if not os.path.exists(subdir_path):
+                print(f"⚠️ No directory for {subdir_path}, skipping")
+                continue
+
             for pq in glob(os.path.join(subdir_path, "*.parquet")):
                 try:
                     df = self.deserialise(pq)
-                    num_rows += len(df)
-                    # print(f"📄 Read {pq}: {len(df)} rows")
                     for sub_spec in specs:
                         try:
                             df_sub = self.apply_spec(df.copy(), sub_spec, name)
                             df_sub = self.validate(df_sub, sub_spec, name)
+                            
+                            if df_sub.empty:
+                                continue
 
-                            dfs.append(df_sub)
+                            # Determine output name for this specific sub-spec + dataframe
+                            out_name = self.output_name(name, sub_spec, df_sub)
+                            
+                            if out_name in all_data:
+                                all_data[out_name] = pd.concat([all_data[out_name], df_sub], ignore_index=True)
+                            else:
+                                all_data[out_name] = df_sub
+
                         except Exception as e:
                             print(f"⚠️ Error applying spec for {sub_spec}: {e}")
                             traceback.print_exc()
-                    # print(f"📦 Finished parsing: {name} ({num_rows} rows total)")
                 except Exception as e:
                     print(f"⚠️ Error reading {pq}: {e}")
                     break
-
-            if dfs:
-                df_all = pd.concat(dfs, ignore_index=True)
-
-                out_name = self.output_name(name, spec)
-                if out_name in all_data:
-                    before = len(all_data[out_name])
-                    all_data[out_name] = pd.concat([all_data[out_name], df_all], ignore_index=True)
-                    after = len(all_data[out_name])
-                    print(f"🔗 Merged {name} into {out_name}: {before} → {after} rows")
-                else:
-                    all_data[out_name] = df_all
 
         # 🔹 Serialise once per unique output name
         for out_name, df in all_data.items():
@@ -157,7 +152,7 @@ class BaseParser:
         raise NotImplementedError
 
     # Must be implemented by child
-    def output_name(self, name, spec):
+    def output_name(self, name, spec, df=None):
         raise NotImplementedError
     
     # Default: no validation (override in EdgeParser)
@@ -206,7 +201,7 @@ class NodeParser(BaseParser):
         
         return df
 
-    def output_name(self, name, spec):
+    def output_name(self, name, spec, df=None):
         return name  # node type
     
     def parse(self):
@@ -243,6 +238,32 @@ class EdgeParser(BaseParser):
         
         pmid = _clean(lit_val)
         return [pmid] if pmid else None
+
+    def _get_prop_value(self, spec, prop_name, df=None):
+        """
+        Extract a property value from spec (constant) or dataframe (first row).
+        """
+        # 1. Check if it's a constant in props
+        props = spec.get("props", [])
+        for p in props:
+            if isinstance(p, str) and "=" in p:
+                key, val = p.split("=", 1)
+                if key == prop_name and "constant:" in val:
+                    return val.split("constant:")[1]
+
+        # 2. Check for relation_name (specific to EdgeParser)
+        # We also check 'relation' if it's a constant (not likely but safe)
+        if prop_name == "relation_name" and "relation_name" in spec:
+            return spec["relation_name"]
+
+        # 3. Fallback: inspect dataframe
+        if df is not None and not df.empty and prop_name in df.columns:
+            val = df[prop_name].iloc[0]
+            if isinstance(val, (list, dict, np.ndarray)):
+                return "complex"
+            return str(val) if pd.notnull(val) else "unknown"
+
+        return "unknown"
 
     @staticmethod
     def _expand_targets(raw_val):
@@ -376,8 +397,26 @@ class EdgeParser(BaseParser):
         raise ValueError(f"Unsupported targetId {tgt_col} for {name}")
     
 
-    def output_name(self, name, spec):
-        return name  # one parquet per sourceId dir
+    def output_name(self, name, spec, df=None):
+        """
+        Construct filename: {source_type}_{relation_name}_{datasourceId}_{target_type}
+        """
+        source_type = self._get_prop_value(spec, "source_type", df)
+        
+        relation_name = self._get_prop_value(spec, "relation_name", df)
+        if relation_name == "unknown" and "relation" in spec:
+            # If relation_name is unknown, check if 'relation' spec key gives us a column or value
+            relation_name = self._get_prop_value(spec, "relation", df)
+            
+        datasourceId = self._get_prop_value(spec, "datasourceId", df)
+        target_type = self._get_prop_value(spec, "target_type", df)
+
+        base = f"{source_type}_{relation_name}_{target_type}_{datasourceId}"
+        # Cleanup for filename-safe (lowercase and remove non-alphanumeric except underscore)
+        clean_base = re.sub(r'[^a-zA-Z0-9_]', '_', base).lower()
+        # Collapse multiple underscores
+        clean_base = re.sub(r'_+', '_', clean_base).strip('_')
+        return clean_base
     
     def validate(self, df, spec, name):
         """Ensure sources/targets exist in node_store."""
@@ -389,33 +428,6 @@ class EdgeParser(BaseParser):
 
         df = df[src_valid & tgt_valid]
         return df
-
-    def _deduplicate_static_edges(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        undirected de-duplication for static edges.
-        Assumes one relation + datasource per file.
-        """
-        if not self.static or df.empty:
-            return df
-
-        # Convert once for stable ordering
-        src = df["sourceId"].astype(str).values
-        tgt = df["targetId"].astype(str).values
-
-        # Canonical ordering (vectorised, no DataFrame ops)
-        df["sourceId"] = np.minimum(src, tgt)
-        df["targetId"] = np.maximum(src, tgt)
-
-        before = len(df)
-        df = df.drop_duplicates(
-            subset=["sourceId", "targetId"],
-            keep="first"
-        )
-        after = len(df)
-
-        print(f"🔁 Static edge de-duplication: {before:,} → {after:,}")
-        return df
-
 
 
     def serialise(self, df, out_path):
@@ -470,12 +482,6 @@ class EdgeParser(BaseParser):
         if missing_cols:
             print(f"⚠️ Skipping save for {out_path}, missing columns: {missing_cols}")
             return
-
-        # -----------------------------------
-        # De-duplicate static edges
-        # -----------------------------------
-        # if self.static:
-        #     df = self._deduplicate_static_edges(df)
 
         # -----------------------------------
         # Drop rows missing required fields

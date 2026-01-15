@@ -1,0 +1,24 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run KG Pipeline",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "src/pipeline/kg_pipeline.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--input", "ot_files_subset",
+                "--node-schema", "config/node_schema.yaml",
+                "--edge-schema", "config/edge_schema.yaml",
+                "--static-edge-schema", "config/static_edge_schema.yaml",
+                "--node-output", "kg_output/nodes",
+                "--edge-output", "kg_output/edges"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        }
+    ]
+}

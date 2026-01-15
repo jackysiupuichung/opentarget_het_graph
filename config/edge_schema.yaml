@@ -1,7 +1,7 @@
 # TODO: what about edges with no temporal information? e.g. intogen, progeny (supp file temporal trend)
 
-targets:
-  name: target_gene_ontology_go
+gene_ontology:
+  input_dir: targets
   sourceId: id
   targetId: go.id
   relation_name: has_function_in
@@ -13,20 +13,21 @@ targets:
     year
   ]
 
-sourceId=cancer_biomarkers:
+cancer_biomarkers:
+  input_dir: sourceId=cancer_biomarkers
   name: cancer_biomarker
   sourceId: targetId
   targetId: diseaseId
   relation_name: somatic_mutation
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=chembl:
-  - name: chembl
+chembl:
+  - input_dir: sourceId=chembl
+    name: chembl
     sourceId: targetId
     targetId: diseaseId
     relation_name: clinical_trial
     props: [source_type=constant:disease, target_type=constant:target, clinicalStatus, studyStopReasonCategories, datasourceId, score, year, id]
-
 
   - name: chembl
     sourceId: drugId
@@ -34,8 +35,9 @@ sourceId=chembl:
     relation_name: modulated_by
     props: [source_type=constant:molecule, target_type=constant:target, datasourceId, score=constant:1.0, year, id]
 
-sourceId=reactome:
-  - name: reactome
+reactome:
+  - input_dir: sourceId=reactome
+    name: reactome
     sourceId: targetId
     targetId: diseaseId
     relation_name: affected_pathway
@@ -53,30 +55,33 @@ sourceId=reactome:
     relation_name: associated_with
     props: [source_type=constant:disease, target_type=constant:reactome, datasourceId, score=constant:1.0, year, id]
 
-sourceId=clingen:
+clingen:
+  input_dir: sourceId=clingen
   name: clingen
   sourceId: targetId
   targetId: diseaseId
   relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=eva:
+eva:
+  input_dir: sourceId=eva
   name: eva
   sourceId: targetId
   targetId: diseaseId
   relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=gene_burden:
+gene_burden:
+  input_dir: sourceId=gene_burden
   name: gene_burden
   sourceId: targetId
   targetId: diseaseId
   relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=slapenrich:
-  
-  - sourceId: targetId
+slapenrich:
+  - input_dir: sourceId=slapenrich
+    sourceId: targetId
     targetId: diseaseId
     relation_name: affected_pathway
     props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
@@ -91,159 +96,92 @@ sourceId=slapenrich:
     relation_name: associated_with
     props: [source_type=constant:disease, target_type=constant:reactome, datasourceId, score=constant:1.0, year, id]
 
-sourceId=crispr:
+crispr:
+  input_dir: sourceId=crispr
   sourceId: targetId
   targetId: diseaseId
   relation_name: affected_pathway
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=eva_somatic:
+eva_somatic:
+  input_dir: sourceId=eva_somatic
   sourceId: targetId
   targetId: diseaseId
   relation_name: somatic_mutation
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=genomics_england:
+genomics_england:
+  input_dir: sourceId=genomics_england
   sourceId: targetId
   targetId: diseaseId
   relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=orphanet:
+orphanet:
+  input_dir: sourceId=orphanet
   sourceId: targetId
   targetId: diseaseId
   relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=sysbio:
+sysbio:
+  input_dir: sourceId=sysbio
   sourceId: targetId
   targetId: diseaseId
   relation_name: affected_pathway
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=cancer_gene_census:
+cancer_gene_census:
+  input_dir: sourceId=cancer_gene_census
   sourceId: targetId
   targetId: diseaseId
   relation_name: somatic_mutation
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=crispr_screen:
+crispr_screen:
+  input_dir: sourceId=crispr_screen
   sourceId: targetId
   targetId: diseaseId
   relation_name: affected_pathway
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=expression_atlas:
+expression_atlas:
+  input_dir: sourceId=expression_atlas
   sourceId: targetId
   targetId: diseaseId
   relation_name: rna_expression
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-# sourceId=progeny:
-#   - sourceId: targetId
-#     targetId: diseaseId
-#     relation_name: affected_pathway
-#     props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
-
-#   - sourceId: targetId
-#     targetId: pathways.id
-#     relation_name: involved_in
-#     props: [source_type=constant:target, target_type=constant:reactome, datasourceId, score=constant:1.0, year, id]
-
-#   - sourceId: diseaseId
-#     targetId: pathways.id
-#     relation_name: associated_with
-#     props: [source_type=constant:disease, target_type=constant:reactome, datasourceId, score=constant:1.0, year, id]
-
-sourceId=crispr:
-  sourceId: targetId
-  targetId: diseaseId
-  relation_name: affected_pathway
-  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
-
-sourceId=eva_somatic:
-  sourceId: targetId
-  targetId: diseaseId
-  relation_name: somatic_mutation
-  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
-
-sourceId=genomics_england:
+uniprot_literature:
+  input_dir: sourceId=uniprot_literature
   sourceId: targetId
   targetId: diseaseId
   relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=orphanet:
-  sourceId: targetId
-  targetId: diseaseId
-  relation_name: genetic_association
-  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
-
-sourceId=sysbio:
-  sourceId: targetId
-  targetId: diseaseId
-  relation_name: affected_pathway
-  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
-
-sourceId=cancer_gene_census:
-  sourceId: targetId
-  targetId: diseaseId
-  relation_name: somatic_mutation
-  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
-
-sourceId=crispr_screen:
-  sourceId: targetId
-  targetId: diseaseId
-  relation_name: affected_pathway
-  props: [source_type=constant:target, target_type=constant:disease, cellType, datasourceId, score, year, id]
-
-sourceId=expression_atlas:
-  sourceId: targetId
-  targetId: diseaseId
-  relation_name: rna_expression
-  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
-
-# sourceId=progeny:
-#   - sourceId: targetId
-#     targetId: diseaseId
-#     relation_name: affected_pathway
-#     props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
-
-#   - sourceId: targetId
-#     targetId: pathways.id
-#     relation_name: involved_in
-#     props: [source_type=constant:target, target_type=constant:reactome, datasourceId, score, year, id]
-
-#   - sourceId: diseaseId
-#     targetId: pathways.id
-#     relation_name: datatypeId
-#     props: [source_type=constant:disease, target_type=constant:reactome, datasourceId, score, year, id]
-
-sourceId=uniprot_literature:
-  sourceId: targetId
-  targetId: diseaseId
-  relation_name: genetic_association
-  props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
-
-sourceId=europepmc:
+europepmc:
+  input_dir: sourceId=europepmc
   sourceId: targetId
   targetId: diseaseId
   relation_name: literature
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=gene2phenotype:
+gene2phenotype:
+  input_dir: sourceId=gene2phenotype
   sourceId: targetId
   targetId: diseaseId
   relation_name: genetic_association
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=impc:
+impc:
+  input_dir: sourceId=impc
   sourceId: targetId
   targetId: diseaseId
   relation_name: animal_model
   props: [source_type=constant:target, target_type=constant:disease, datasourceId, score, year, id]
 
-sourceId=uniprot_variants:
+uniprot_variants:
+  input_dir: sourceId=uniprot_variants
   sourceId: targetId
   targetId: diseaseId
   relation_name: genetic_association

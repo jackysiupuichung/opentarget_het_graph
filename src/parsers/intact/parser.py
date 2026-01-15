@@ -66,7 +66,9 @@ class IntActParser(EdgeParser):
         df = pd.DataFrame(results)
         df = self.validate(df, None, "intact")
         
-        out_path = os.path.join(self.output_dir, "intact.parquet")
+        # Determine output name dynamically
+        out_name = self.output_name("intact", {"relation": "interacts_with", "props": ["datasourceId=constant:intact", "source_type=constant:target", "target_type=constant:target"]}, df)
+        out_path = os.path.join(self.output_dir, f"{out_name}.parquet")
         self.serialise(df, out_path)
         return {"intact": df}
 
