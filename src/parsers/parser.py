@@ -27,7 +27,6 @@ def fetch_pubmed_years(pubmed_ids):
     Results are cached in the global PUBMED_CACHE.
     """
     ids_to_fetch = [pid for pid in pubmed_ids if pid not in PUBMED_CACHE]
-    ids_to_fetch = ids_to_fetch[:100]
     if not ids_to_fetch:
         return PUBMED_CACHE
     

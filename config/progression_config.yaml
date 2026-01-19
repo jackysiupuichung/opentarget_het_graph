@@ -8,96 +8,73 @@ data_sources:
   gwas_credible_sets:
     datatype: genetic_association
     weight: 1.0
-    cutoff: 0.1
   eva:
     datatype: genetic_association
     weight: 1.0
-    cutoff: 0.1
   gene_burden:
     datatype: genetic_association
     weight: 1.0
-    cutoff: 0.1
   genomics_england:
     datatype: genetic_association
     weight: 1.0
-    cutoff: 0.1
   gene2phenotype:
     datatype: genetic_association
     weight: 1.0
-    cutoff: 0.1
   uniprot_literature:
     datatype: genetic_association
     weight: 1.0
-    cutoff: 0.1
   uniprot_variants:
     datatype: genetic_association
     weight: 1.0
-    cutoff: 0.1
   orphanet:
     datatype: genetic_association
     weight: 1.0
-    cutoff: 0.1
   clingen:
     datatype: genetic_association
     weight: 1.0
-    cutoff: 0.1
   cancer_gene_census:
     datatype: somatic_mutation
     weight: 1.0
-    cutoff: 0.1
   intogen:
     datatype: somatic_mutation
     weight: 1.0
-    cutoff: 0.1
   eva_somatic:
     datatype: somatic_mutation
     weight: 1.0
-    cutoff: 0.1
   cancer_biomarkers:
     datatype: somatic_mutation
     weight: 1.0
-    cutoff: 0.1
   chembl:
     datatype: known_drug
     weight: 1.0
-    cutoff: 0.1
   crispr_screen:
     datatype: affected_pathway
     weight: 1.0
-    cutoff: 0.1
   crispr:
     datatype: affected_pathway
     weight: 1.0
-    cutoff: 0.1
   slapenrich:
     datatype: affected_pathway
     weight: 0.5
-    cutoff: 0.1
   progeny:
     datatype: affected_pathway
     weight: 0.5
-    cutoff: 0.1
   reactome:
     datatype: affected_pathway
     weight: 1.0
-    cutoff: 0.1
   sysbio:
     datatype: affected_pathway
     weight: 0.5
-    cutoff: 0.1
   europepmc:
     datatype: literature
     weight: 0.2
-    cutoff: 0.1
+    cutoff: 0.3
   expression_atlas:
     datatype: rna_expression
     weight: 0.2
-    cutoff: 0.1
   impc:
     datatype: animal_model
     weight: 0.2
-    cutoff: 0.1
   gene_ontology:
     datatype: functional_annotation
     weight: 1.0
-    cutoff: 0.1
