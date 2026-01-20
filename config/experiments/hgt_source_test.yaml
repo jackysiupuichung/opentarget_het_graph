@@ -1,0 +1,21 @@
+# HGT Test Configuration - 1 Epoch with k=[100, 200, 500]
+# Quick test to verify pipeline works end-to-end
+
+# Inherit from base config
+defaults:
+  - ../benchmark_config
+
+# Experiment name
+experiment_name: "hgt_source_test_1epoch"
+
+# Override training settings for quick test
+train:
+  num_epochs: 1  # Single epoch for testing
+  batch_size: 512
+  lr: 0.001
+  early_stopping:
+    enabled: false  # Disable for 1 epoch
+
+# Override evaluation settings
+eval:
+  k_values: [100, 200, 500]  # Custom k values as requested

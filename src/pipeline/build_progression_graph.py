@@ -130,9 +130,18 @@ def inspect_progression_graph(df_dynamic, df_static):
 # 3. PROGRESSION BUILD
 # ----------------------------------------------------
 
-def build_progression(dynamic_evd, static_evd, config, output_dir, use_weights=True):
+def build_progression(dynamic_evd, static_evd, config, output_dir, granularity="relation_datasource"):
     """
-    Build progression graph by aggregating scores to (source, target, relation, datasourceId) level.
+    Build progression graph with configurable granularity.
+    
+    Args:
+        dynamic_evd: Dynamic evidence DataFrame
+        static_evd: Static evidence DataFrame
+        config: Configuration dictionary
+        output_dir: Output directory path
+        granularity: "relation" or "relation_datasource"
+            - "relation": Aggregate to (source, target, relation) level (no scores)
+            - "relation_datasource": Keep (source, target, relation, datasource) with scores
     """
     ds_config = config.get("data_sources", {})
     years_range = config.get("time_range", {"first_year": 2000, "last_year": 2025})
@@ -141,29 +150,30 @@ def build_progression(dynamic_evd, static_evd, config, output_dir, use_weights=T
     # --- Process Dynamic Edges ---
     dynamic_progression = []
     if not dynamic_evd.empty:
-        print(f"📊 Aggregating dynamic progression (Use weights: {use_weights})...")
+        print(f"📊 Aggregating dynamic progression (Granularity: {granularity})...")
         
-        # 1. Map weights from config
-        if use_weights:
-            dynamic_evd["weight"] = dynamic_evd["datasourceId"].map(lambda x: ds_config.get(x, {}).get("weight", 1.0))
-        else:
-            dynamic_evd["weight"] = 1.0
-            
-        dynamic_evd["weighted_score"] = dynamic_evd["score"] * dynamic_evd["weight"]
+        # Determine grouping keys based on granularity
+        if granularity == "relation":
+            # Relation-level: aggregate across all datasources
+            group_keys = ["sourceId", "targetId", "source_type", "target_type", "relation"]
+        else:  # relation_datasource
+            # Relation::datasource level: keep datasource separate
+            group_keys = ["sourceId", "targetId", "source_type", "target_type", "relation", "datasourceId"]
         
-        # 2. Group by edge identity
-        # Aggregate on: sourceId, targetId, source_type, target_type, relation, datasourceId
-        group_keys = ["sourceId", "targetId", "source_type", "target_type", "relation", "datasourceId"]
         grouped = dynamic_evd.groupby(group_keys)
         
         for keys, group in tqdm(grouped, desc="Processing Dynamic Edges"):
-            src, tgt, src_t, tgt_t, rel, ds = keys
-            
-            # Get specific cutoff for this datasource
-            cutoff = ds_config.get(ds, {}).get("cutoff", 0.0)
+            if granularity == "relation":
+                src, tgt, src_t, tgt_t, rel = keys
+                ds = None  # No datasource at relation level
+                cutoff = 0.0  # No datasource-specific cutoff
+            else:
+                src, tgt, src_t, tgt_t, rel, ds = keys
+                # Get specific cutoff for this datasource
+                cutoff = ds_config.get(ds, {}).get("cutoff", 0.0)
             
             # Group scores by year for this specific edge
-            year_dict = group.groupby("year")["weighted_score"].apply(list).to_dict()
+            year_dict = group.groupby("year")["score"].apply(list).to_dict()
             collected_scores = []
             
             # Compute cumulative harmonic sum year-by-year
@@ -177,22 +187,27 @@ def build_progression(dynamic_evd, static_evd, config, output_dir, use_weights=T
                     
                 hs = harmonic_sum(collected_scores)
                 
-                # Filter by datasource-specific cutoff
+                # Filter by datasource-specific cutoff (only for relation_datasource)
                 if hs < cutoff:
                     continue
 
                 # Monotonic filter: only store if the score increases (or first appearance)
                 if hs > prev_hs:
-                    dynamic_progression.append({
+                    edge_data = {
                         "sourceId": src,
                         "targetId": tgt,
                         "source_type": src_t,
                         "target_type": tgt_t,
                         "relation": rel,
-                        "datasourceId": ds,
                         "year": y,
-                        "score": hs
-                    })
+                    }
+                    
+                    # Add datasource and score only for relation_datasource granularity
+                    if granularity == "relation_datasource":
+                        edge_data["datasourceId"] = ds
+                        edge_data["score"] = hs
+                    
+                    dynamic_progression.append(edge_data)
                     prev_hs = hs
 
     df_dynamic = pd.DataFrame(dynamic_progression)
@@ -202,21 +217,30 @@ def build_progression(dynamic_evd, static_evd, config, output_dir, use_weights=T
     df_static = pd.DataFrame()
     if not static_evd.empty:
         print("📌 Processing static edges...")
-        df_static = static_evd[["sourceId", "targetId", "source_type", "target_type", "relation", "datasourceId", "score"]].drop_duplicates()
         
-        # Apply datasource-specific cutoffs to static edges
-        def _filter_static(row):
-            ds = row["datasourceId"]
-            cutoff = ds_config.get(ds, {}).get("cutoff", 0.0)
-            return row["score"] >= cutoff
+        if granularity == "relation":
+            # Relation-level: only keep relation, no datasource or score
+            df_static = static_evd[["sourceId", "targetId", "source_type", "target_type", "relation"]].drop_duplicates()
+        else:  # relation_datasource
+            # Relation::datasource level: keep datasource and score
+            df_static = static_evd[["sourceId", "targetId", "source_type", "target_type", "relation", "datasourceId", "score"]].drop_duplicates()
             
-        if not df_static.empty:
-            df_static = df_static[df_static.apply(_filter_static, axis=1)]
+            # Apply datasource-specific cutoffs to static edges
+            def _filter_static(row):
+                ds = row["datasourceId"]
+                cutoff = ds_config.get(ds, {}).get("cutoff", 0.0)
+                return row["score"] >= cutoff
+                
+            if not df_static.empty:
+                df_static = df_static[df_static.apply(_filter_static, axis=1)]
 
     # --- Save Outputs ---
     os.makedirs(output_dir, exist_ok=True)
-    dynamic_path = os.path.join(output_dir, "source_level_progression_dynamic.parquet")
-    static_path = os.path.join(output_dir, "source_level_progression_static.parquet")
+    
+    # Use granularity in filename
+    suffix = "relation" if granularity == "relation" else "relation_datasource"
+    dynamic_path = os.path.join(output_dir, f"{suffix}_progression_dynamic.parquet")
+    static_path = os.path.join(output_dir, f"{suffix}_progression_static.parquet")
     
     df_dynamic.to_parquet(dynamic_path, index=False)
     df_static.to_parquet(static_path, index=False)
@@ -230,12 +254,12 @@ def build_progression(dynamic_evd, static_evd, config, output_dir, use_weights=T
             "version": "1.0",
             "timestamp": datetime.now().isoformat(),
             "config_source": "progression_config.yaml",
-            "use_weights": use_weights,
+            "granularity": granularity,
             "data_source_configs": ds_config
         },
         "tracking": {
-            "dynamic_file": "source_level_progression_dynamic.parquet",
-            "static_file": "source_level_progression_static.parquet",
+            "dynamic_file": f"{suffix}_progression_dynamic.parquet",
+            "static_file": f"{suffix}_progression_static.parquet",
             "dynamic_edge_count": len(df_dynamic),
             "static_edge_count": len(df_static)
         }
@@ -258,7 +282,9 @@ if __name__ == "__main__":
     parser.add_argument("--static-dir", required=True, help="Directory with static edges")
     parser.add_argument("--config-file", required=True, help="Path to progression_config.yaml")
     parser.add_argument("--output-dir", required=True, help="Directory for output parquets and metadata")
-    parser.add_argument("--use-weights", action="store_true", default=False, help="Whether to apply data source weights from config")
+    parser.add_argument("--granularity", type=str, default="relation_datasource", 
+                        choices=["relation", "relation_datasource"],
+                        help="Granularity level: 'relation' (no scores) or 'relation_datasource' (with scores)")
 
     args = parser.parse_args()
 
@@ -276,7 +302,7 @@ if __name__ == "__main__":
     inspect_evidence_graph(dynamic_evd, static_evd)
     
     # Build progression
-    df_dyn, df_stat = build_progression(dynamic_evd, static_evd, config, args.output_dir, use_weights=args.use_weights)
+    df_dyn, df_stat = build_progression(dynamic_evd, static_evd, config, args.output_dir, granularity=args.granularity)
     
     # Inspect progression
     inspect_progression_graph(df_dyn, df_stat)

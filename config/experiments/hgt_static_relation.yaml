@@ -1,0 +1,29 @@
+# HGT on Static Heterogeneous Graph with Relation-Level Edges
+# This configuration uses relation-level edge granularity (no scores)
+
+# Inherit from base config and override specific parameters
+defaults:
+  - ../benchmark_config
+
+# Experiment name
+experiment_name: "hgt_static_relation"
+
+# Data configuration overrides
+data:
+  graph:
+    mode: "static"
+    edge_granularity: "relation"  # Aggregate to (source, target, relation)
+
+# Model configuration
+model:
+  hgt:
+    hidden_dim: 128
+    num_heads: 4
+    num_layers: 2
+    dropout: 0.1
+
+# Training configuration
+train:
+  batch_size: 512
+  num_epochs: 100
+  lr: 0.001

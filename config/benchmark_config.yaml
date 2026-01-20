@@ -1,0 +1,62 @@
+# OpenTargets Heterogeneous Graph Benchmarking Configuration
+# SIMPLIFIED: Relation::Source Level Only
+
+# Experiment name
+experiment_name: "hgt_source_benchmark"
+
+# Data configuration
+data:
+  edge_dir: "output/edges"  # Directory with edge parquet files
+  
+  # Temporal split configuration
+  temporal_split:
+    cutoff_year: 2020  # Training data up to this year
+    horizon: 2         # Total prediction window (years)
+    val_years: 1       # Years for validation
+  
+  # Graph configuration
+  graph:
+    mode: "static"  # Static snapshot (temporal mode for future)
+    
+    # Supervision task (link prediction target)
+    supervision:
+      src_type: "disease"
+      relation: "clinical_trial"
+      dst_type: "target"
+
+# Model configuration
+model:
+  # Node features
+  node_features:
+    init_method: "random"  # Random initialization
+    embedding_dim: 128
+  
+  # HGT architecture
+  hgt:
+    hidden_dim: 128
+    num_heads: 4
+    num_layers: 2
+    dropout: 0.1
+
+# Training configuration
+train:
+  batch_size: 512
+  num_epochs: 10
+  lr: 0.001
+  weight_decay: 0.0
+  seed: 42
+  
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 5
+    monitor: "val_loss"
+
+# Evaluation configuration
+eval:
+  k_values: [10, 20, 50, 100]  # Top-k values for metrics
+  
+  # Cold start evaluation
+  cold_start:
+    enabled: false
+    min_interactions: 5

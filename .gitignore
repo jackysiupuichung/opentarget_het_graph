@@ -12,4 +12,6 @@ venv/
 
 # OS
 .DS_Store
-data/
+
+# Data directories (root level only, not src/data)
+/data/

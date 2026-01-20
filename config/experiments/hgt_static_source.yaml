@@ -1,0 +1,29 @@
+# HGT on Static Heterogeneous Graph with Source-Level Edges
+# This configuration uses source-level edge granularity (with scores)
+
+# Inherit from base config and override specific parameters
+defaults:
+  - ../benchmark_config
+
+# Experiment name
+experiment_name: "hgt_static_source"
+
+# Data configuration overrides
+data:
+  graph:
+    mode: "static"
+    edge_granularity: "source"  # Keep (source, target, relation, datasource) with scores
+
+# Model configuration
+model:
+  hgt:
+    hidden_dim: 128
+    num_heads: 4
+    num_layers: 2
+    dropout: 0.1
+
+# Training configuration
+train:
+  batch_size: 512
+  num_epochs: 100
+  lr: 0.001
