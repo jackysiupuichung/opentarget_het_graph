@@ -185,7 +185,7 @@ def main(config_path: str):
         train_edge_times = train_context[supervision_edge_type].edge_time
     else:
         # Fallback: use zeros if no temporal info
-        train_edge_times = torch.zeros(train_edge_index.size(1))
+        train_edge_times = torch.zeros(train_edge_index.size(1), dtype=torch.long)
     
     train_loader = LinkNeighborLoader(
         data=train_context,
@@ -207,7 +207,7 @@ def main(config_path: str):
     if 'edge_time' in hetero_data[supervision_edge_type]:
         val_edge_times = hetero_data[supervision_edge_type].edge_time[val_mask]
     else:
-        val_edge_times = torch.zeros(val_edge_index.size(1))
+        val_edge_times = torch.zeros(val_edge_index.size(1), dtype=torch.long)
     
     val_loader = LinkNeighborLoader(
         data=train_context,
