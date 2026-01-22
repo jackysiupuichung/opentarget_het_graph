@@ -228,14 +228,18 @@ def build_event_list(
     
     events = events.sort_values(group_cols + ['year'])
     
-    # Group and filter
-    compressed = []
-    for combo, group in events.groupby(group_cols):
-        # Keep first event and events where score changed from previous year
-        keep_mask = group['score'].diff().fillna(1.0) != 0
-        compressed.append(group[keep_mask])
+    # Vectorized filtering: Keep if it's the first occurrence of a group OR if score changed
+    # 1. Compare Current row with Previous row for the group columns
+    # We use .shift(1) to get the value of the previous row
+    group_changed = (events[group_cols] != events[group_cols].shift(1)).any(axis=1)
     
-    events = pd.concat(compressed, ignore_index=True)
+    # 2. Compare Current score with Previous score
+    score_changed = (events['score'] != events['score'].shift(1))
+    
+    # Keep row if it's a new group OR if the score changed within the same group
+    keep_mask = group_changed | score_changed
+    
+    events = events[keep_mask]
     print(f"✅ {len(events):,} events after filtering (score changes only)")
     
     # Rename for clarity
