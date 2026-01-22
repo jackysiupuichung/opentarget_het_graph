@@ -7,6 +7,9 @@ import torch
 from torch_geometric.data import HeteroData
 from typing import Dict, List, Tuple
 from .hgt import HGTLinkPredictor
+from .gat_v2 import GATv2
+from .gat_v3 import GATv3
+
 
 
 def get_metadata(data: HeteroData) -> Tuple[List[str], List[Tuple[str, str, str]]]:
@@ -24,40 +27,59 @@ def get_metadata(data: HeteroData) -> Tuple[List[str], List[Tuple[str, str, str]
     return (node_types, edge_types)
 
 
-def build_hgt_model(
+def build_model(
+    model_name: str,
     data: HeteroData,
     hidden_dim: int = 128,
     out_dim: int = 128,
     num_heads: int = 4,
     num_layers: int = 2,
     dropout: float = 0.1,
-) -> HGTLinkPredictor:
+) -> torch.nn.Module:
     """
-    Build HGT model from HeteroData.
+    Build model from HeteroData.
     
     Args:
+        model_name: Name of model to build (hgt, gatv2, gatv3, etc)
         data: HeteroData object
         hidden_dim: Hidden dimension
         out_dim: Output dimension
         num_heads: Number of attention heads
-        num_layers: Number of HGT layers
+        num_layers: Number of layers
         dropout: Dropout rate
         
     Returns:
-        HGTLinkPredictor model
+        differentiable PyTorch model
     """
     node_types, edge_types = get_metadata(data)
     metadata = (node_types, edge_types)
     
-    model = HGTLinkPredictor(
-        hidden_dim=hidden_dim,
-        out_dim=out_dim,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        node_types=node_types,
-        metadata=metadata,
-        dropout=dropout,
-    )
+    if model_name == 'hgt':
+        model = HGTLinkPredictor(
+            hidden_dim=hidden_dim,
+            out_dim=out_dim,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            node_types=node_types,
+            metadata=metadata,
+            dropout=dropout,
+        )
+    elif model_name == 'gatv2':
+        model = GATv2(
+            hidden_dim=hidden_dim,
+            out_dim=out_dim,
+            num_heads=num_heads,
+            dropout=dropout
+        )
+    elif model_name == 'gatv3':
+        model = GATv3(
+            hidden_dim=hidden_dim,
+            out_dim=out_dim,
+            num_heads=num_heads,
+            dropout=dropout
+        )
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
     
     return model
 

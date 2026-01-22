@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from torch_geometric.loader import LinkNeighborLoader
 
 from data.temporal_loader import load_event_graph, get_temporal_masks, filter_graph_by_time, to_time_agnostic
-from models.utils import build_hgt_model
+from models.utils import build_model
 from benchmark.evaluator import Evaluator
 from data.evaluation_prep import build_evaluation_sets
 
@@ -35,13 +35,22 @@ def train_one_epoch(model, loader, optimizer, device, supervision_edge_type, src
         batch = batch.to(device)
         optimizer.zero_grad()
         
+        # Prepare edge_time_dict if available
+        edge_time_dict = None
+        # Check if batch has edge_time (it might be in individual edge stores)
+        # LinkNeighborLoader returns HeteroData where each edge type has attributes
+        # We collect them into a dict
+        if any('edge_time' in batch[et] for et in batch.edge_types):
+             edge_time_dict = {et: batch[et].edge_time for et in batch.edge_types if 'edge_time' in batch[et]}
+
         # Forward pass
         pred_scores = model(
             batch.x_dict,
             batch.edge_index_dict,
             batch[supervision_edge_type].edge_label_index,
             src_type,
-            dst_type
+            dst_type,
+            edge_time_dict=edge_time_dict
         )
         
         # Prepare targets (MSE Regression)
@@ -153,72 +162,73 @@ def main(config_path: str):
     print(f"  Val edges   ({train_year} < t <= {val_year}): {val_edge_index.size(1):,}")
     print(f"  Test edges  (> {val_year}): {test_mask.sum():,}")
     
-    # 6. Loaders
-    print("\n🚚 Creating Loaders...")
+    # # 6. Loaders
+    # print("\n🚚 Creating Loaders...")
     
-    # Extract edge times for temporal sampling
-    # Extract edge times for temporal sampling (if not time_agnostic)
-    train_edge_times = None
-    if not is_time_agnostic:
-        if 'edge_time' in train_context[supervision_edge_type]:
-            train_edge_times = train_context[supervision_edge_type].edge_time
-        else:
-            # Fallback for temporal graph without explicit time? Should not happen in this flow.
-            train_edge_times = torch.zeros(train_edge_index.size(1), dtype=torch.long)
+    # # Extract edge times for temporal sampling
+    # # Extract edge times for temporal sampling (if not time_agnostic)
+    # train_edge_times = None
+    # if not is_time_agnostic:
+    #     if 'edge_time' in train_context[supervision_edge_type]:
+    #         train_edge_times = train_context[supervision_edge_type].edge_time
+    #     else:
+    #         # Fallback for temporal graph without explicit time? Should not happen in this flow.
+    #         train_edge_times = torch.zeros(train_edge_index.size(1), dtype=torch.long)
     
-    train_loader = LinkNeighborLoader(
-        data=train_context,
-        num_neighbors=[20, 10],
-        edge_label_index=(supervision_edge_type, train_edge_index),
-        edge_label=train_labels,
-        edge_label_time=train_edge_times - 1 if train_edge_times is not None else None, 
-        time_attr='edge_time' if not is_time_agnostic else None,  # disable temporal sampling if agnostic
-        temporal_strategy='last',  # ignored if time_attr is None
-        neg_sampling=dict(mode='binary', amount=1.0),
-        batch_size=cfg.train.batch_size,
-        shuffle=True,
-        num_workers=4,
-        persistent_workers=True  # Keep workers alive between epochs
-    )
+    # train_loader = LinkNeighborLoader(
+    #     data=train_context,
+    #     num_neighbors=[20, 10],
+    #     edge_label_index=(supervision_edge_type, train_edge_index),
+    #     edge_label=train_labels,
+    #     edge_label_time=train_edge_times - 1 if train_edge_times is not None else None, 
+    #     time_attr='edge_time' if not is_time_agnostic else None,  # disable temporal sampling if agnostic
+    #     temporal_strategy='last',  # ignored if time_attr is None
+    #     neg_sampling=dict(mode='binary', amount=1.0),
+    #     batch_size=cfg.train.batch_size,
+    #     shuffle=True,
+    #     num_workers=4,
+    #     persistent_workers=True  # Keep workers alive between epochs
+    # )
     
-    # Validation Loader (Regression)
-    # Context: train_context. Labels: val_edge_index
-    # Validation Loader (Regression)
-    # Context: train_context. Labels: val_edge_index
-    # For Time Agnostic: Labels should probably be collapsed too?
-    # BUT val_edge_index comes from 'hetero_data' via 'val_mask'.
-    # 'val_mask' was computed on ORIGINAL temporal data.
-    # So 'val_edge_index' are EVENTS.
-    # predicting EVENTS using STATIC graph?
-    # User said: "Edge-level regression ... future evidence strength".
-    # If we are time-agnostic, maybe we just predict the *Event* score using the *Static* embedding?
-    # This seems fine. We don't collapse the Validation SET, just the Input Graph.
+    # # Validation Loader (Regression)
+    # # Context: train_context. Labels: val_edge_index
+    # # Validation Loader (Regression)
+    # # Context: train_context. Labels: val_edge_index
+    # # For Time Agnostic: Labels should probably be collapsed too?
+    # # BUT val_edge_index comes from 'hetero_data' via 'val_mask'.
+    # # 'val_mask' was computed on ORIGINAL temporal data.
+    # # So 'val_edge_index' are EVENTS.
+    # # predicting EVENTS using STATIC graph?
+    # # User said: "Edge-level regression ... future evidence strength".
+    # # If we are time-agnostic, maybe we just predict the *Event* score using the *Static* embedding?
+    # # This seems fine. We don't collapse the Validation SET, just the Input Graph.
     
-    val_edge_times = None
-    if not is_time_agnostic:
-        if 'edge_time' in hetero_data[supervision_edge_type]:
-            val_edge_times = hetero_data[supervision_edge_type].edge_time[val_mask]
-        else:
-            val_edge_times = torch.zeros(val_edge_index.size(1), dtype=torch.long)
+    # val_edge_times = None
+    # if not is_time_agnostic:
+    #     if 'edge_time' in hetero_data[supervision_edge_type]:
+    #         val_edge_times = hetero_data[supervision_edge_type].edge_time[val_mask]
+    #     else:
+    #         val_edge_times = torch.zeros(val_edge_index.size(1), dtype=torch.long)
     
-    val_loader = LinkNeighborLoader(
-        data=train_context,
-        num_neighbors=[20, 10],
-        edge_label_index=(supervision_edge_type, val_edge_index),
-        edge_label=val_labels,
-        edge_label_time=val_edge_times - 1 if val_edge_times is not None else None,
-        time_attr='edge_time' if not is_time_agnostic else None,
-        temporal_strategy='last',
-        neg_sampling=dict(mode='binary', amount=1.0),
-        batch_size=cfg.train.batch_size,
-        shuffle=False,
-        num_workers=4,
-        persistent_workers=True
-    )
+    # val_loader = LinkNeighborLoader(
+    #     data=train_context,
+    #     num_neighbors=[20, 10],
+    #     edge_label_index=(supervision_edge_type, val_edge_index),
+    #     edge_label=val_labels,
+    #     edge_label_time=val_edge_times - 1 if val_edge_times is not None else None,
+    #     time_attr='edge_time' if not is_time_agnostic else None,
+    #     temporal_strategy='last',
+    #     neg_sampling=dict(mode='binary', amount=1.0),
+    #     batch_size=cfg.train.batch_size,
+    #     shuffle=False,
+    #     num_workers=4,
+    #     persistent_workers=True
+    # )
     
     # 7. Model
-    model = build_hgt_model(
-        train_context, # Initialize with train graph schema
+    model = build_model(
+        model_name=cfg.model.get('name', 'hgt'),
+        data=train_context, # Initialize with train graph schema
         hidden_dim=cfg.model.hgt.hidden_dim,
         num_heads=cfg.model.hgt.num_heads,
         num_layers=cfg.model.hgt.num_layers,

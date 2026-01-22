@@ -9,7 +9,9 @@ with relation::datasource level edges and scores.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import HGTConv, Linear
+# from torch_geometric.nn import HGTConv, Linear # Replaced by custom
+from .hgt_conv_rte import HGTConvRTE as HGTConv
+from torch_geometric.nn import Linear
 from typing import Dict, List, Tuple, Optional
 
 
@@ -75,6 +77,7 @@ class HGT(nn.Module):
         self,
         x_dict: Dict[str, torch.Tensor],
         edge_index_dict: Dict[Tuple[str, str, str], torch.Tensor],
+        edge_time_dict: Optional[Dict[Tuple[str, str, str], torch.Tensor]] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Forward pass.
@@ -89,7 +92,7 @@ class HGT(nn.Module):
         # Apply HGT layers
         for i, conv in enumerate(self.convs):
             # HGT convolution
-            x_dict = conv(x_dict, edge_index_dict)
+            x_dict = conv(x_dict, edge_index_dict, edge_time_dict=edge_time_dict)
             
             # Layer norm + dropout
             x_dict = {
@@ -149,6 +152,7 @@ class HGTLinkPredictor(nn.Module):
         self,
         x_dict: Dict[str, torch.Tensor],
         edge_index_dict: Dict[Tuple[str, str, str], torch.Tensor],
+        edge_time_dict: Optional[Dict[Tuple[str, str, str], torch.Tensor]] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Encode nodes to embeddings.
@@ -160,7 +164,7 @@ class HGTLinkPredictor(nn.Module):
         Returns:
             Node embeddings
         """
-        return self.encoder(x_dict, edge_index_dict)
+        return self.encoder(x_dict, edge_index_dict, edge_time_dict)
     
     def decode(
         self,
@@ -187,6 +191,7 @@ class HGTLinkPredictor(nn.Module):
         edge_label_index: torch.Tensor,
         src_type: str,
         dst_type: str,
+        edge_time_dict: Optional[Dict[Tuple[str, str, str], torch.Tensor]] = None,
     ) -> torch.Tensor:
         """
         Forward pass for link prediction.
@@ -202,7 +207,7 @@ class HGTLinkPredictor(nn.Module):
             Link prediction scores [num_edges]
         """
         # Encode all nodes
-        z_dict = self.encode(x_dict, edge_index_dict)
+        z_dict = self.encode(x_dict, edge_index_dict, edge_time_dict)
         
         # Get embeddings for edges to predict
         z_src = z_dict[src_type][edge_label_index[0]]
