@@ -159,13 +159,13 @@ def build_hetero_graph(edges: pd.DataFrame) -> Tuple[HeteroData, Dict[str, Dict[
             # Event-based: use edge_weight
             hetero_data[edge_type_key].edge_attr = torch.tensor(
                 group['edge_weight'].values,
-                dtype=torch.long
+                dtype=torch.float
             ).unsqueeze(-1)
         elif has_score:
             # Snapshot-based: use score
             hetero_data[edge_type_key].edge_attr = torch.tensor(
                 group['score'].values,
-                dtype=torch.long
+                dtype=torch.float
             ).unsqueeze(-1)
         
         # Add temporal attribute
