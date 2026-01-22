@@ -9,6 +9,7 @@ import torch
 from torch_geometric.data import HeteroData
 from typing import Dict, Tuple, Optional
 from pathlib import Path
+from torch_geometric.utils import coalesce
 
 
 def load_event_graph(
@@ -158,3 +159,78 @@ def print_temporal_summary(data: HeteroData):
             info.append("Weighted")
             
         print(f"   {et}: {num_edges:,} {' | '.join(info)}")
+
+
+def to_time_agnostic(data: HeteroData) -> HeteroData:
+    """
+    Collapse temporal graph into a static time-agnostic graph.
+    
+    Aggregates multiple edges between the same (src, dst) pair into a single edge.
+    Aggregation method: 'max' for edge weights/attributes.
+    Removes 'edge_time' attribute.
+    
+    Args:
+        data: HeteroData object (temporal)
+        
+    Returns:
+        New HeteroData object (static)
+    """
+    new_data = data.clone()
+    
+    print(f"\nTime-Agnostic Collapsing:")
+    
+    for et in new_data.edge_types:
+        edge_index = new_data[et].edge_index
+        num_edges_before = edge_index.size(1)
+        
+        # Gather attributes to aggregate
+        # We assume 'edge_weight' or 'edge_attr' are the scores to max.
+        # If both exist, we need to handle them. Coalesce handles one 'edge_attr'.
+        # If we have multiple, we might need multiple passes or stack them?
+        # Typically HGT uses 'edge_attr' or 'edge_weight'.
+        
+        edge_attr = None
+        if 'edge_weight' in new_data[et]:
+            edge_attr = new_data[et].edge_weight
+            if edge_attr.dim() == 1: edge_attr = edge_attr.view(-1, 1) # Make sure it's [N, 1]
+        elif 'edge_attr' in new_data[et]:
+            edge_attr = new_data[et].edge_attr
+        
+        if edge_attr is not None:
+            # Coalesce with max reduction
+            new_index, new_attr = coalesce(
+                edge_index, 
+                edge_attr, 
+                reduce='max'
+            )
+            
+            new_data[et].edge_index = new_index
+            
+            # Restore attribute name
+            if 'edge_weight' in new_data[et]:
+                new_data[et].edge_weight = new_attr.squeeze() # [N] or [N, 1]
+            elif 'edge_attr' in new_data[et]:
+                new_data[et].edge_attr = new_attr
+                
+        else:
+            # Just unique edges (no weights)
+            # coalesce without attr works? No, it expects attr or you use unique.
+            # torch_geometric.utils.coalesce requires edge_attr? 
+            # Actually, if edge_attr is None, it returns (edge_index, None) if provided?
+            # Documentation says: "If edge_attr is None, it will be ignored."?
+            # Actually, `coalesce(edge_index, edge_attr=None, ...)` returns `edge_index`.
+            
+            new_index = coalesce(
+                edge_index, 
+                None
+            )
+            new_data[et].edge_index = new_index
+
+        # Remove temporal attributes
+        if 'edge_time' in new_data[et]:
+            del new_data[et].edge_time
+            
+        num_edges_after = new_data[et].edge_index.size(1)
+        print(f"   {et}: {num_edges_before:,} -> {num_edges_after:,} edges (Max Aggregation)")
+        
+    return new_data

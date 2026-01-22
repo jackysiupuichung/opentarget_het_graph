@@ -62,14 +62,4 @@ def build_hgt_model(
     return model
 
 
-def count_parameters(model: torch.nn.Module) -> int:
-    """
-    Count trainable parameters in model.
-    
-    Args:
-        model: PyTorch model
-        
-    Returns:
-        Number of trainable parameters
-    """
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
