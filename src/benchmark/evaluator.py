@@ -4,15 +4,12 @@ Evaluator for link prediction benchmarking.
 """
 
 import torch
-import pandas as pd
+import torch.nn.functional as F
 import yaml
 import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 from typing import Dict, List, Optional
-from torch_geometric.nn import MIPSKNNIndex
-
-from .metrics import compute_ranking_metrics
 
 
 class Evaluator:
@@ -40,160 +37,198 @@ class Evaluator:
         if output_dir:
             Path(output_dir).mkdir(parents=True, exist_ok=True)
     
-    def evaluate_regression(
+
+    @torch.no_grad()
+    def validate_regression(
         self,
-        scores: torch.Tensor,
-        targets: torch.Tensor,
-        split: str = "val"
+        model,
+        loader,
+        device,
+        supervision_edge_type,
+        src_type,
+        dst_type
     ) -> float:
         """
-        Compute regression metric (MSE) on predicted scores.
+        Run regression validation loop on a loader.
         """
-        mse = torch.nn.functional.mse_loss(scores, targets).item()
-        print(f"📊 {split.capitalize()} MSE: {mse:.4f}")
-        return mse
+        model.eval()
+        total_loss = 0
+        total_examples = 0
+        
+        for batch in loader:
+            batch = batch.to(device)
+            
+            pred_scores = model(
+                batch.x_dict,
+                batch.edge_index_dict,
+                batch[supervision_edge_type].edge_label_index,
+                src_type,
+                dst_type
+            )
+            
+            num_pos = batch[supervision_edge_type].edge_label.size(0)
+            full_batch_size = batch[supervision_edge_type].edge_label_index.size(1)
+            num_neg = full_batch_size - num_pos
+            
+            pos_targets = batch[supervision_edge_type].edge_label.float()
+            neg_targets = torch.zeros(num_neg, device=device)
+            targets = torch.cat([pos_targets, neg_targets])
+            
+            # Slice prediction to match targets just in case
+            curr_pred = pred_scores[:targets.size(0)]
+            loss = F.mse_loss(curr_pred, targets)
+            
+            total_loss += loss.item() * full_batch_size
+            total_examples += full_batch_size
+            
+        return total_loss / total_examples
 
-    def evaluate_ranking_exhaustive(
+
+
+    def evaluate_ranking(
         self,
         model,
         inference_data,
-        ground_truth_data,
+        test_targets_dict: Dict[int, object],
+        history_targets_dict: Dict[int, object],
+        unique_test_srcs: List[int],
         edge_type,
-        eval_mask,
-        exclusion_mask,
+        num_dst_nodes: int,
         device,
-        batch_size_emb: int = None
+        num_negatives: int = 1000,
+        batch_size_eval: int = 10000 
     ) -> Dict[str, float]:
         """
-        Exhaustive ranking evaluation using MIPS.
+        Ranking evaluation with filtering of historical edges.
         
         Args:
-            model: Trained HGT model
+            model: Trained model
             inference_data: Data snapshot used for embedding generation (strict no-leakage)
-            ground_truth_data: Full data containing ground truth edges
+            test_targets_dict: Dict mapping source_id -> set(target_ids) for evaluation
+            history_targets_dict: Dict mapping source_id -> set(target_ids) to exclude
+            unique_test_srcs: List of source IDs to evaluate
             edge_type: Edge type to evaluate (src, rel, dst)
-            eval_mask: Mask of edges to evaluate (e.g. test set)
-            exclusion_mask: Mask of edges to exclude (e.g. training set)
+            num_dst_nodes: Total number of destination nodes
             device: torch device
-            batch_size_emb: Optional batch size for embedding generation (not yet used, full batch assumed)
+            num_negatives: Number of negative samples. If None or <= 0, use exhaustive.
+            batch_size_eval: Batch size for scoring candidates
             
         Returns:
-            Dict of metrics (P@k, R@k, NDCG@k)
+            Dict of metrics
         """
-        print(f"\n🔍 Evaluating Ranking on {eval_mask.sum()} edges...")
+        mode = "Negative Sampling" if num_negatives and num_negatives > 0 else "Exhaustive"
+        print(f"\n🔍 Evaluating Ranking ({mode}) on {len(unique_test_srcs)} unique source nodes...")
         
         src_type, _, dst_type = edge_type
         
-        # 1. Build Ground Truth Dict
-        # Only evaluate on edges present in eval_mask
-        eval_edge_index = ground_truth_data[edge_type].edge_index[:, eval_mask]
-        
-        if eval_edge_index.size(1) == 0:
-            print("⚠️ No evaluation edges found.")
-            return {}
-
-        eval_dict = {}
-        src_indices = eval_edge_index[0].tolist()
-        dst_indices = eval_edge_index[1].tolist()
-        unique_src_nodes = set()
-        
-        for src, dst in zip(src_indices, dst_indices):
-            if src not in eval_dict:
-                eval_dict[src] = []
-            eval_dict[src].append(dst)
-            unique_src_nodes.add(src)
-            
-        print(f"   Evaluating {len(eval_dict)} unique source nodes")
-        
-        # 2. Build Exclusion Index
-        # Exclude edges in exclusion_mask (e.g. training edges)
-        exclude_edge_index = ground_truth_data[edge_type].edge_index[:, exclusion_mask].to(device)
-        
-        from torch_geometric import EdgeIndex
-        num_src = ground_truth_data[src_type].num_nodes
-        num_dst = ground_truth_data[dst_type].num_nodes
-        
-        # Sparse index for fast lookup of "known" positives
-        exclude_links = EdgeIndex(
-            exclude_edge_index,
-            sparse_size=(num_src, num_dst)
-        ).sort_by('row')[0]
-        
-        # 3. Generate Embeddings using INFERENCE snapshot
-        # This ensures we don't leak future edges into embeddings
+        # 3. Generate Embeddings (Once)
         print("   Generating embeddings using inference snapshot...")
         model.eval()
         
         with torch.no_grad():
-            x_dict = {k: v.to(device) for k, v in inference_data.x_dict.items()}
-            edge_index_dict = {k: v.to(device) for k, v in inference_data.edge_index_dict.items()}
+            # Handle node features input
+            try:
+                 # If it's a Batch or has x_dict
+                 x_dict = {k: v.to(device) for k, v in inference_data.x_dict.items()}
+            except (KeyError, AttributeError):
+                 # Fallback: construct from node types
+                 x_dict = {}
+                 for nt in inference_data.node_types:
+                     if hasattr(inference_data[nt], 'x') and inference_data[nt].x is not None:
+                         x_dict[nt] = inference_data[nt].x.to(device)
             
-            # Full batch inference (CPU fallback if OOM)
+            # Handle edge index input
+            if hasattr(inference_data, 'edge_index_dict'):
+                edge_index_dict = {k: v.to(device) for k, v in inference_data.edge_index_dict.items()}
+            else:
+                 edge_index_dict = {}
+                 for et in inference_data.edge_types:
+                     if hasattr(inference_data[et], 'edge_index') and inference_data[et].edge_index is not None:
+                         edge_index_dict[et] = inference_data[et].edge_index.to(device)
+            
             try:
                 out_dict = model.encode(x_dict, edge_index_dict)
-                src_emb = out_dict[src_type]
-                dst_emb = out_dict[dst_type]
+                src_emb_all = out_dict[src_type]
+                dst_emb_all = out_dict[dst_type]
             except RuntimeError:
                 print("   ⚠️ Full graph inference failed (OOM). Switching to CPU...")
                 model = model.cpu()
                 x_dict = {k: v.cpu() for k, v in inference_data.x_dict.items()}
                 edge_index_dict = {k: v.cpu() for k, v in inference_data.edge_index_dict.items()}
                 out_dict = model.encode(x_dict, edge_index_dict)
-                src_emb = out_dict[src_type]
-                dst_emb = out_dict[dst_type]
+                src_emb_all = out_dict[src_type].to(device)
+                dst_emb_all = out_dict[dst_type].to(device)
                 model = model.to(device)
-                src_emb = src_emb.to(device)
-                dst_emb = dst_emb.to(device)
 
-        # 4. MIPS Search
-        print("   Indexing candidates...")
-        # Index all items (targets)
-        mips = MIPSKNNIndex(dst_emb)
-        
-        metrics = {k: {'p': [], 'r': [], 'ndcg': []} for k in self.k_values}
+        # 4. Evaluation Loop
+        metrics = {k: {'p': [], 'r': [], 'ndcg': [], 'mrr': []} for k in self.k_values}
         max_k = max(self.k_values)
         
-        print("   Ranking...")
-        for src_id in tqdm(list(unique_src_nodes), desc="Ranking sources"):
-            true_dsts = set(eval_dict[src_id])
+        for src_id in tqdm(list(unique_test_srcs), desc="Ranking sources"):
+            true_dsts = test_targets_dict[src_id]
+            history_dsts = history_targets_dict.get(src_id, set())
             
-            # Get excluded items for this source
-            start = exclude_links.indptr[src_id]
-            end = exclude_links.indptr[src_id+1]
-            exclude_dsts = exclude_links.col[start:end]
+            src_vec = src_emb_all[src_id:src_id+1] # [1, dim]
             
-            # Search top-(k + num_excluded)
-            src_vec = src_emb[src_id:src_id+1]
+            # --- Identify Candidates ---
+            if num_negatives and num_negatives > 0:
+                # NEGATIVE SAMPLING MODE
+                # 1. Sample Random Negatives
+                neg_indices = torch.randint(0, num_dst_nodes, (num_negatives,), device=device)
+                
+                # 2. Combine with True Positives
+                true_indices = torch.tensor(list(true_dsts), device=device, dtype=torch.long)
+                candidate_indices = torch.cat([true_indices, neg_indices]).unique()
+                
+                # 3. Filter History (if any sampled negatives are in history)
+                if history_dsts:
+                    hist_tensor = torch.tensor(list(history_dsts), device=device, dtype=torch.long)
+                    # Keep only candidates NOT in history
+                    # Note: We must ensure True Positives are NOT filtered out (though they shouldn't be in history if data is correct)
+                    # But if they are, we should probably keep them for evaluation?
+                    # The 'evaluator' correctness depends on 'novelty'.
+                    # If a true positive IS in history, it's not novel.
+                    # Assuming input ensures novelty.
+                    
+                    mask = ~torch.isin(candidate_indices, hist_tensor)
+                    candidate_indices = candidate_indices[mask]
+                    
+                # 4. Score Subset
+                if len(candidate_indices) == 0:
+                    top_k_list = []
+                else:
+                    cand_emb = dst_emb_all[candidate_indices]
+                    # Use model to decode
+                    scores = model.decode(src_vec, cand_emb) # [num_candidates]
+                    
+                    # 5. Get Top-K relative to candidates
+                    # We want the indices of the top-k candidates, but mapped back to global IDs
+                    k_actual = min(max_k, len(scores))
+                    _, top_indices_local = torch.topk(scores, k_actual)
+                    top_global_indices = candidate_indices[top_indices_local].tolist()
+                    top_k_list = top_global_indices
+                    
+            else:
+                # EXHAUSTIVE MODE
+                # candidates = all targets
+                
+                # scores_all: [1, num_dst] -> [num_dst]
+                # Use model to decode. src_vec is [1, D], dst_emb_all is [N, D].
+                # Broadcasting (1, D) * (N, D) -> (N, D) -> sum -> (N)
+                scores_all = model.decode(src_vec, dst_emb_all)
+                
+                # Mask History
+                if history_dsts:
+                    hist_tensor = torch.tensor(list(history_dsts), device=device, dtype=torch.long)
+                    scores_all[hist_tensor] = -float('inf')
+                
+                # Get Top-K
+                _, top_indices = torch.topk(scores_all, max_k)
+                top_k_list = top_indices.tolist()
             
-            # MIPSKNNIndex.search implicitly handles exclusion if supported, 
-            # OR we fetch more and filter.
-            # PyG's MIPSKNNIndex.search supports `exclude_links` in recent versions:
-            # .search(query, k, exclude_links=None)
-            # If src_id is passed? No, it takes vectorized exclusion or just raw indices?
-            # It seems standard search takes `exclude_links` as neighbors of the query index 
-            # IF query is index. But here query is vector.
-            # Workaround: Fetch Top-K, filter excludes. BUT if many excludes, K might be insufficient.
-            # Usually we fetch K + len(excludes).
-            
-            # NOTE: MIPSKNNIndex implementation varies. 
-            # If we assume we can't efficiently exclude inside MIPS on GPU easily without custom kernel:
-            # We fetch a larger K.
-            
-            # Current PyG (2.6+) MIPSKNNIndex supports exclusion if using faiss/etc? 
-            # Let's rely on the exclusion parameter `exclude_links` if passed correctly.
-            # Wait, `MIPSKNNIndex.search` signature: (x_q, k, exclude_links=None)
-            # where exclude_links is Tensor of indices to exclude?
-            # Or CSR?
-            
-            # Let's assume standard implementation: 
-            # If we pass exclude_dsts (Tensor), it filters them out.
-            
-            _, pred_indices = mips.search(src_vec, max_k, exclude_dsts)
-            
-            top_k = pred_indices[0].tolist()
-            
+            # Compute Metrics
             for k in self.k_values:
-                curr_top = top_k[:k]
+                curr_top = top_k_list[:k]
                 hits = len(set(curr_top) & true_dsts)
                 
                 metrics[k]['p'].append(hits / k)
@@ -203,14 +238,24 @@ class Evaluator:
                 dcg = 0.0
                 idcg = 0.0
                 
+                # DCG
                 for i, t in enumerate(curr_top):
                     if t in true_dsts:
                         dcg += 1.0 / np.log2(i + 2)
                 
+                # IDCG
                 for i in range(min(k, len(true_dsts))):
                     idcg += 1.0 / np.log2(i + 2)
                     
                 metrics[k]['ndcg'].append(dcg / idcg if idcg > 0 else 0)
+                
+                # MRR
+                rr = 0.0
+                for i, t in enumerate(curr_top):
+                    if t in true_dsts:
+                        rr = 1.0 / (i + 1)
+                        break
+                metrics[k]['mrr'].append(rr)
         
         # 5. Report
         final_metrics = {}
@@ -219,10 +264,12 @@ class Evaluator:
             p = np.mean(metrics[k]['p'])
             r = np.mean(metrics[k]['r'])
             n = np.mean(metrics[k]['ndcg'])
+            m = np.mean(metrics[k]['mrr'])
             final_metrics[f"P@{k}"] = p
             final_metrics[f"R@{k}"] = r
             final_metrics[f"NDCG@{k}"] = n
-            print(f"   k={k:<3}: P={p:.4f}, R={r:.4f}, NDCG={n:.4f}")
+            final_metrics[f"MRR@{k}"] = m
+            print(f"   k={k:<3}: P={p:.4f}, R={r:.4f}, NDCG={n:.4f}, MRR={m:.4f}")
             
         # Save results
         if self.output_dir:
@@ -231,4 +278,8 @@ class Evaluator:
         return final_metrics
 
     def save_results(self, metrics, split, filename=None):
-        super().save_results(metrics, split, filename)
+        if not self.output_dir: return
+        file_path = Path(self.output_dir) / (filename or f"metrics_{split}.yaml")
+        with open(file_path, "w") as f:
+            yaml.dump(metrics, f)
+        print(f"   💾 Saved metrics to {file_path}")

@@ -21,6 +21,7 @@ from torch_geometric.loader import LinkNeighborLoader
 from data.temporal_loader import load_event_graph, get_temporal_masks, filter_graph_by_time
 from models.utils import build_hgt_model, count_parameters
 from benchmark.evaluator import Evaluator
+from data.evaluation_prep import build_evaluation_sets
 
 
 def train_one_epoch(model, loader, optimizer, device, supervision_edge_type, src_type, dst_type):
@@ -70,38 +71,8 @@ def train_one_epoch(model, loader, optimizer, device, supervision_edge_type, src
     return total_loss / total_examples
 
 
-@torch.no_grad()
-def validate_regression(model, loader, device, supervision_edge_type, src_type, dst_type):
-    model.eval()
-    total_loss = 0
-    total_examples = 0
-    
-    for batch in loader:
-        batch = batch.to(device)
-        
-        pred_scores = model(
-            batch.x_dict,
-            batch.edge_index_dict,
-            batch[supervision_edge_type].edge_label_index,
-            src_type,
-            dst_type
-        )
-        
-        num_pos = batch[supervision_edge_type].edge_label.size(0)
-        full_batch_size = batch[supervision_edge_type].edge_label_index.size(1)
-        num_neg = full_batch_size - num_pos
-        
-        pos_targets = batch[supervision_edge_type].edge_label.float()
-        neg_targets = torch.zeros(num_neg, device=device)
-        targets = torch.cat([pos_targets, neg_targets])
-        
-        curr_pred = pred_scores[:targets.size(0)]
-        loss = F.mse_loss(curr_pred, targets)
-        
-        total_loss += loss.item() * full_batch_size
-        total_examples += full_batch_size
-        
-    return total_loss / total_examples
+
+
 
 
 def main(config_path: str):
@@ -162,11 +133,9 @@ def main(config_path: str):
     # Val Edges: (train_year < t <= val_year)
     masks = get_temporal_masks(hetero_data, train_year, val_year)
     _, val_mask, test_mask_raw = masks[supervision_edge_type] # val_mask is correct
+    train_mask = masks[supervision_edge_type][0]
     
     # We need explicit test_mask for test_year (val_year < t <= test_year)
-    # get_temporal_masks returns test_mask as > val_year. 
-    # If we want strictly test_year, we should check max year. 
-    # But usually > val_year is enough if data ends at test_year.
     test_mask = test_mask_raw
     
     val_edge_index = hetero_data[supervision_edge_type].edge_index[:, val_mask]
@@ -236,20 +205,59 @@ def main(config_path: str):
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
     evaluator = Evaluator(k_values=cfg.eval.k_values, output_dir=f"runs/{cfg.get('experiment_name', 'default')}")
     
-    # 8. Training Loop
+    # 8. Pre-compute Evaluation Sets (Validation & Test)
+    print("\n🛠️  Pre-computing Evaluation Sets...")
+    
+    # Validation Sets
+    val_targets, val_history, val_srcs = build_evaluation_sets(
+        hetero_data, 
+        supervision_edge_type, 
+        val_mask, 
+        train_mask
+    )
+    print(f"   Validation: {len(val_srcs)} unique sources")
+    
+    # Test Sets (Ground Truth for Final Eval)
+    exclusion_mask = (train_mask | val_mask)
+    test_targets, test_history, test_srcs = build_evaluation_sets(
+        hetero_data,
+        supervision_edge_type,
+        test_mask,
+        exclusion_mask
+    )
+    print(f"   Test: {len(test_srcs)} unique sources")
+    
+    # 9. Training Loop
     print("\n🔄 Starting Training...")
     best_val_loss = float('inf')
     
     for epoch in range(cfg.train.num_epochs):
         train_loss = train_one_epoch(model, train_loader, optimizer, device, supervision_edge_type, src_type, dst_type)
-        val_loss = validate_regression(model, val_loader, device, supervision_edge_type, src_type, dst_type)
+        val_loss = evaluator.validate_regression(model, val_loader, device, supervision_edge_type, src_type, dst_type)
         
-        print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+        print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Val Regression Loss: {val_loss:.4f}")
         
-        # Save Best
+    # Validation Ranking (Periodically or every epoch)
+        # We run this to "Monitor" as requested
+        print(f"   Running Validation Ranking...")
+        
+        val_metrics = evaluator.evaluate_ranking(
+            model,
+            inference_data=train_context,    # Context <= 2020
+            test_targets_dict=val_targets,
+            history_targets_dict=val_history,
+            unique_test_srcs=val_srcs,
+            edge_type=supervision_edge_type,
+            num_dst_nodes=hetero_data[dst_type].num_nodes,
+            device=device,
+            num_negatives=1000 # Default sampling for validation speed
+        )
+        
+        # Save Best based on REGRESSION Loss (Primary Objective)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), f"{evaluator.output_dir}/best_model.pt")
+            print("   💾 New Best Model Saved!")
             
     print(f"✅ Training Complete. Best Val Loss: {best_val_loss:.4f}")
     
@@ -263,25 +271,20 @@ def main(config_path: str):
     # Context: test_context (edges <= val_year)
     # Ground Truth: hetero_data (full)
     # Eval Mask: test_mask (edges > val_year)
-    # Exclusion: edges <= val_year (ALL history)
+    # Exclusion: edges <= val_year (ALL history = train + val)
     
-    # Temporal masks returns (train, val, test)
-    # exclusion_mask should be logical OR of train and val?
-    # get_temporal_masks returns BOOLEAN masks on the FULL data.
-    # So exclusion mask = ~test_mask (everything NOT in test) assuming strictly temporal
-    # Or explicitly (train_mask | val_mask).
+    exclusion_mask = (train_mask | val_mask)
     
-    ms = get_temporal_masks(hetero_data, train_year, val_year)[supervision_edge_type]
-    exclusion_mask = (ms[0] | ms[1]) # Train | Val
-    
-    metrics = evaluator.evaluate_ranking_exhaustive(
+    metrics = evaluator.evaluate_ranking(
         model,
-        inference_data=test_context,     # <= 2021
-        ground_truth_data=hetero_data,   # All data
+        inference_data=test_context,
+        test_targets_dict=test_targets,
+        history_targets_dict=test_history,
+        unique_test_srcs=test_srcs,
         edge_type=supervision_edge_type,
-        eval_mask=test_mask,            # 2022 edges
-        exclusion_mask=exclusion_mask,  # <= 2021 edges
-        device=device
+        num_dst_nodes=hetero_data[dst_type].num_nodes,
+        device=device,
+        num_negatives=None # Use None for Exhaustive Ranking on Test (Headline Numbers)
     )
     
     print("\n✅ Final Test Metrics:")
