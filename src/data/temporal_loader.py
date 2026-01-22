@@ -7,7 +7,7 @@ Handles loading of event-based HeteroData and creating temporal masks.
 
 import torch
 from torch_geometric.data import HeteroData
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List, Union
 from pathlib import Path
 from torch_geometric.utils import coalesce
 
@@ -62,7 +62,7 @@ def load_event_graph(
 def filter_graph_by_time(data: HeteroData, year: int) -> HeteroData:
     """
     Filter graph to include only edges up to a specific year.
-    Creates a snapshot view of the graph.
+    Creates a temporal cut off view of the graph.
     
     Args:
         data: HeteroData object with edge_time
@@ -234,3 +234,63 @@ def to_time_agnostic(data: HeteroData) -> HeteroData:
         print(f"   {et}: {num_edges_before:,} -> {num_edges_after:,} edges (Max Aggregation)")
         
     return new_data
+
+
+def to_temporal_snapshots(
+    data: HeteroData,
+    start_year: Optional[int] = None,
+    end_year: Optional[int] = None,
+    verbose: bool = True
+) -> Dict[int, HeteroData]:
+    """
+    Materialize yearly snapshots of the graph.
+    
+    For each year y, creates a static graph containing the max score of edges
+    observed up to year y (cumulative).
+    
+    Args:
+        data: HeteroData object (temporal)
+        start_year: Start year (inclusive). Defaults to min edge time.
+        end_year: End year (inclusive). Defaults to max edge time.
+        verbose: Print progress
+        
+    Returns:
+        Dictionary {year: static_hetero_data}
+    """
+    if verbose:
+        print("\n📸 Materializing Temporal Snapshots...")
+        
+    # Determine range
+    all_times = []
+    for et in data.edge_types:
+        if 'edge_time' in data[et]:
+            all_times.append(data[et].edge_time)
+            
+    if not all_times:
+        print("⚠️ No temporal information found. Returning single snapshot.")
+        return {0: to_time_agnostic(data)}
+        
+    all_times = torch.cat(all_times)
+    min_t = int(all_times.min().item())
+    max_t = int(all_times.max().item())
+    
+    if start_year is None: start_year = min_t
+    if end_year is None: end_year = max_t
+    
+    snapshots = {}
+    
+    for year in range(start_year, end_year + 1):
+        if verbose: print(f"\n🗓️  Year: {year}")
+        
+        # 1. Filter (Cumulative <= year)
+        # Note: filter_graph_by_time follows cumulative logic
+        snapshot_temporal = filter_graph_by_time(data, year)
+        
+        # 2. Collapse to static
+        # This keeps the MAX score for duplicate edges
+        snapshot_static = to_time_agnostic(snapshot_temporal)
+        
+        snapshots[year] = snapshot_static
+        
+    if verbose: print(f"\n✅ Created {len(snapshots)} snapshots ({start_year}-{end_year})")
+    return snapshots

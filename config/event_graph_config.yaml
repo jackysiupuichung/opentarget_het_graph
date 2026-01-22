@@ -1,10 +1,17 @@
-# Progression Graph Configuration
+# Event Graph Configuration
+# Defines parameters for building the temporal event graph from raw Open Targets evidence.
 
 time_range:
+  # Represents the years for which we will generate cumulative scores. all prior evidences are considered
   first_year: 2000
   last_year: 2025
 
 datasources:
+  # Configuration for each datasource combination (relation::datasourceId).
+  # 'datatype': Used for grouping or analysis.
+  # 'weight': Multiplier for the score (default 1.0).
+  # 'cutoff': Minimum score threshold to include the edge (optional).
+  
   # Genetic Association (target -> disease)
   genetic_association::eva:
     datatype: genetic_association
