@@ -12,7 +12,7 @@ data:
   # Temporal split configuration
   temporal_split:
     train: [2000, 2016]
-    val: [2014, 2017]
+    val: [2017, 2017]
     test: [2018, 2025]
     
   graph:
