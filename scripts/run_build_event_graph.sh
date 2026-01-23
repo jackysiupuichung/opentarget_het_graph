@@ -16,6 +16,7 @@ CONFIG="config/event_graph_config.yaml"
 RAW_EDGES_DIR="output/edges"
 EVENTS_OUTPUT="output/progression/events.parquet"
 GRAPH_OUTPUT="output/progression/temporal_graph.pt"
+ANALYSIS_OUTPUT="output/analysis"
 
 # === Step 1: Build Event List (Aggregated Events) ===
 echo "🚀 Building Event List from ${RAW_EDGES_DIR}..."
@@ -39,5 +40,12 @@ echo "🚀 Building HeteroData Graph..."
 python -m src.pipeline.build_event_graph \
   --input "$EVENTS_OUTPUT" \
   --output "$GRAPH_OUTPUT"
+
+# === Step 3: Analyze Graph ===
+echo "🚀 Analyzing Graph..."
+
+python -m src.data.analyze_graph \
+  --file "$GRAPH_OUTPUT" \
+  --output "$ANALYSIS_OUTPUT"
 
 echo "✅ Event Graph Build Pipeline Complete!"
