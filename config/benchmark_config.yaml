@@ -11,9 +11,9 @@ data:
   
   # Temporal split configuration
   temporal_split:
-    train_year: 2020   # Train on edges <= 2020
-    val_year: 2021     # Validate on edges in 2021 (excl. 2020)
-    test_year: 2022    # Test on edges in 2022 (excl. 2021)
+    train_year: 2016   # Train on edges <= 2016
+    val_year: 2017     # Validate on edges in 2017 (excl. 2016)
+    test_year: 2025    # Test on edges in 2018-2025
     
   graph:
     mode: "event"  # Options: event, time_agnostic, temporal_snapshot

@@ -6,9 +6,9 @@ experiment_name: "hgt_agnostic"
 data:
   temporal_graph_file: "output/progression/temporal_graph.pt"
   temporal_split:
-    train_year: 2020
-    val_year: 2021
-    test_year: 2022
+    train_year: 2016
+    val_year: 2017
+    test_year: 2025
   graph:
     mode: "time_agnostic"  # COLLAPSE TEMPORAL EDGES
     supervision:
