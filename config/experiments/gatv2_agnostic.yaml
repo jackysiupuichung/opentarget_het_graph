@@ -5,10 +5,6 @@ experiment_name: "gatv2_agnostic"
 
 data:
   temporal_graph_file: "output/progression/temporal_graph.pt"
-  temporal_split:
-    train_year: 2016
-    val_year: 2017
-    test_year: 2025
   graph:
     mode: "time_agnostic"  # COLLAPSE TEMPORAL EDGES
     supervision:
