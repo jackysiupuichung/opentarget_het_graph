@@ -101,22 +101,30 @@ def filter_graph_by_time(data: HeteroData, year: int) -> HeteroData:
 
 def get_temporal_masks(
     data: HeteroData,
-    train_year: int,
-    val_year: int
+    split_config=None,
+    train_year: int = None,
+    val_year: int = None
 ) -> Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """
     Create train/val/test masks based on edge_time.
+    Supports either explicit ranges (split_config) or legacy cumulative years (train_year, val_year).
     
     Args:
         data: HeteroData object with edge_time
-        train_year: Max year for training (inclusive)
-        val_year: Max year for validation (inclusive)
+        split_config: Dict with 'train', 'val', 'test' keys containing [start, end] lists.
+        train_year: (Legacy) Max year for training.
+        val_year: (Legacy) Max year for validation.
         
     Returns:
         Dictionary mapping edge_type -> (train_mask, val_mask, test_mask)
     """
     masks = {}
     
+    # helper to check range
+    def is_in_range(times, rng):
+        start, end = rng
+        return (times >= start) & (times <= end)
+
     for edge_type in data.edge_types:
         if 'edge_time' not in data[edge_type]:
             # If no time, assume context (all train)
@@ -127,10 +135,25 @@ def get_temporal_masks(
         else:
             edge_time = data[edge_type].edge_time
             
-            # Allow scalar comparison even if edge_time is float
-            train_mask = edge_time <= train_year
-            val_mask = (edge_time > train_year) & (edge_time <= val_year)
-            test_mask = edge_time > val_year
+            if split_config is not None:
+                # New Range-based Logic
+                # Check for explicit 'train', 'val', 'test' ranges
+                # split_config might be OmegaConf object or dict
+                
+                # Default ranges if missing
+                tr_range = split_config.get('train', [0, 0])
+                val_range = split_config.get('val', [0, 0])
+                test_range = split_config.get('test', [0, 0])
+                
+                train_mask = is_in_range(edge_time, tr_range)
+                val_mask = is_in_range(edge_time, val_range)
+                test_mask = is_in_range(edge_time, test_range)
+                
+            else:
+                # Legacy Logic (Cumulative)
+                train_mask = edge_time <= train_year
+                val_mask = (edge_time > train_year) & (edge_time <= val_year)
+                test_mask = edge_time > val_year
             
         masks[edge_type] = (train_mask, val_mask, test_mask)
         

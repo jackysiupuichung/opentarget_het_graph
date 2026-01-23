@@ -90,12 +90,18 @@ def main(config_path: str):
     )
     
     # 3. Splits & Collapsing
-    train_year = cfg.data.temporal_split.train_year
-    val_year = cfg.data.temporal_split.val_year
+    # 3. Splits & Collapsing
+    # Support new explicit range config: train: [start, end], val: [start, end], test: [start, end]
     
-    # Create Snapshots
-    train_snapshot = filter_graph_by_time(hetero_data, train_year)
-    val_snapshot = filter_graph_by_time(hetero_data, val_year)
+    train_end = cfg.data.temporal_split.train[1]
+    val_end = cfg.data.temporal_split.val[1]
+    split_config = cfg.data.temporal_split
+    
+    # Create Snapshots (Context)
+    # Train context is everything UP TO train_end
+    train_snapshot = filter_graph_by_time(hetero_data, train_end)
+    # Test context is everything UP TO val_end
+    val_snapshot = filter_graph_by_time(hetero_data, val_end)
     
     print("   Collapsing temporal graph into static view...")
     train_context = to_time_agnostic(train_snapshot) # Input for Train/Val
@@ -114,25 +120,34 @@ def main(config_path: str):
     if not supervision_edge_type: raise ValueError("Supervision edge type not found")
     
     # 5. Extract Edges for Splits
-    # Train Edges (Collapsed Context)
+    # Train Edges (Collapsed Context) - NOTE: This uses ALL edges in train_context.
+    # New logic: If temporal_split.train has a start year > 2000, we technically should filter out old edges?
+    # But 'train_context' = filter_graph_by_time(train_end). It includes 2000-2016.
+    # If config says Train: [2000, 2016], this is consistent.
+    
     train_edge_index = train_context[supervision_edge_type].edge_index
     if 'edge_attr' in train_context[supervision_edge_type]:
         train_labels = train_context[supervision_edge_type].edge_attr.squeeze()
     else: train_labels = torch.ones(train_edge_index.size(1))
     
-    # Val Edges (From Raw, masked to 2021)
-    masks = get_temporal_masks(hetero_data, train_year, val_year)
-    _, val_mask, test_mask_raw = masks[supervision_edge_type]
-    train_mask = masks[supervision_edge_type][0]
-    test_mask = test_mask_raw
+    # Val Edges (From Raw, masked to Val Range)
+    # Pass split_config if available, or legacy years
+    masks = get_temporal_masks(
+        hetero_data, 
+        split_config=split_config,
+        train_year=train_end, 
+        val_year=val_end
+    )
+    
+    train_mask, val_mask, test_mask = masks[supervision_edge_type]
     
     val_edge_index = hetero_data[supervision_edge_type].edge_index[:, val_mask]
     val_labels = hetero_data[supervision_edge_type].edge_attr.squeeze()[val_mask]
     
     print(f"Stats:")
-    print(f"  Train edges (<= {train_year}): {train_edge_index.size(1):,}")
-    print(f"  Val edges   ({train_year} < t <= {val_year}): {val_edge_index.size(1):,}")
-    print(f"  Test edges  (> {val_year}): {test_mask.sum():,}")
+    print(f"  Train edges (Context): {train_edge_index.size(1):,}")
+    print(f"  Val edges   (Target):  {val_edge_index.size(1):,}")
+    print(f"  Test edges  (Target):  {test_mask.sum():,}")
     
     # 6. Loaders
     print("\n🚚 Creating Loaders (Static)...")
