@@ -203,11 +203,31 @@ def build_event_list(
         
         if cumulative_edges.empty:
             continue
+            
+        # Split into Clinical (MAX) and Others (Harmonic Sum)
+        mask_clinical = cumulative_edges['relation'].str.contains('clinical_trial', case=False)
+        clinical_edges = cumulative_edges[mask_clinical]
+        other_edges = cumulative_edges[~mask_clinical]
         
-        # Group by combination and aggregate scores
-        year_scores = cumulative_edges.groupby(group_cols, as_index=False).agg({
-            'score': lambda x: aggregate_scores(x.values, method=aggregation_method)
-        })
+        dfs_to_concat = []
+        
+        # 1. Clinical Trials -> MAX
+        if not clinical_edges.empty:
+            clinical_agg = clinical_edges.groupby(group_cols, as_index=False)['score'].max()
+            dfs_to_concat.append(clinical_agg)
+            
+        # 2. Others -> Harmonic Sum (or whatever aggregation_method is set to)
+        if not other_edges.empty:
+            # Vectorized harmonic sum is hard, stick to lambda for now or optimize later
+            other_agg = other_edges.groupby(group_cols, as_index=False).agg({
+                'score': lambda x: aggregate_scores(x.values, method=aggregation_method)
+            })
+            dfs_to_concat.append(other_agg)
+            
+        if not dfs_to_concat:
+            continue
+            
+        year_scores = pd.concat(dfs_to_concat, ignore_index=True)
         
         # Add year column
         year_scores['year'] = year
