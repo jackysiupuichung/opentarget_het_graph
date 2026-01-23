@@ -101,7 +101,12 @@ def main(config_path: str):
     # 2. Load Data
     project_root = os.path.dirname(os.path.dirname(__file__))
     temporal_graph_path = os.path.join(project_root, cfg.data.temporal_graph_file)
-    hetero_data = load_event_graph(temporal_graph_path, attach_features=True, embedding_dim=cfg.model.node_features.embedding_dim)
+    hetero_data = load_event_graph(
+        temporal_graph_path, 
+        attach_features=True, 
+        to_undirected=True, 
+        embedding_dim=cfg.model.node_features.embedding_dim
+    )
     
     # 3. Splits
     train_year = cfg.data.temporal_split.train_year

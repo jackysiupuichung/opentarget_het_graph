@@ -10,11 +10,13 @@ from torch_geometric.data import HeteroData
 from typing import Dict, Tuple, Optional, List, Union
 from pathlib import Path
 from torch_geometric.utils import coalesce
+import torch_geometric.transforms as T
 
 
 def load_event_graph(
     filepath: str,
     attach_features: bool = False,
+    to_undirected: bool = False,
     embedding_dim: int = 128,
     seed: int = 42
 ) -> HeteroData:
@@ -38,6 +40,11 @@ def load_event_graph(
     
     if not isinstance(data, HeteroData):
         raise TypeError(f"Expected HeteroData, got {type(data)}")
+    
+    # 1. Convert to undirected for GNN message passing
+    if to_undirected:
+        print("🔄 Converting to undirected graph (adding reverse edges)...")
+        data = T.ToUndirected()(data)
     
     # Optionally attach features
     if attach_features:
