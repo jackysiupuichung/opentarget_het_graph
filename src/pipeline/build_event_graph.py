@@ -98,7 +98,8 @@ def extract_nodes_from_edges(edges: pd.DataFrame) -> Tuple[Dict[str, List[str]],
     return nodes, id_to_type
 
 
-def build_hetero_graph(edges: pd.DataFrame) -> Tuple[HeteroData, Dict[str, Dict[str, int]]]:
+
+def build_hetero_graph(edges: pd.DataFrame) -> Tuple[HeteroData, Dict]:
     """
     Build heterogeneous graph from edges - RELATION::SOURCE LEVEL ONLY.
     
@@ -112,7 +113,11 @@ def build_hetero_graph(edges: pd.DataFrame) -> Tuple[HeteroData, Dict[str, Dict[
         
     Returns:
         hetero_data: HeteroData object
-        id_maps: Dictionary mapping node_type -> {node_id_str -> internal_idx}
+        mappings: Dictionary containing:
+            - node_mapping: {node_type: {node_id_str: index}}
+            - node_type_mapping: {node_type: type_index}
+            - edge_type_mapping: {edge_type_tuple: type_index}
+            - edge_mapping: {edge_type_tuple: original_indices_tensor}
     """
     print("\n🔨 Building HeteroData (relation::source level)...")
     
@@ -121,9 +126,11 @@ def build_hetero_graph(edges: pd.DataFrame) -> Tuple[HeteroData, Dict[str, Dict[
     nodes, id_to_type = extract_nodes_from_edges(edges)
     
     # Create ID mappings
-    id_maps = {}
+    node_mapping = {}
+    node_type_mapping = {nt: i for i, nt in enumerate(sorted(nodes.keys()))}
+    
     for node_type, node_list in nodes.items():
-        id_maps[node_type] = {node_id: idx for idx, node_id in enumerate(node_list)}
+        node_mapping[node_type] = {node_id: idx for idx, node_id in enumerate(node_list)}
         print(f"   {node_type}: {len(node_list)} nodes")
     
     # Build HeteroData
@@ -133,6 +140,8 @@ def build_hetero_graph(edges: pd.DataFrame) -> Tuple[HeteroData, Dict[str, Dict[
     print("\n🔗 Adding nodes...")
     for node_type, node_list in nodes.items():
         hetero_data[node_type].num_nodes = len(node_list)
+        # Store original IDs to allow feature mapping later
+        hetero_data[node_type].node_id = node_list
         print(f"✅ Added {len(node_list)} {node_type} nodes")
     
     # Build edges
@@ -146,13 +155,26 @@ def build_hetero_graph(edges: pd.DataFrame) -> Tuple[HeteroData, Dict[str, Dict[
     # Group by edge type
     edge_groups = edges.groupby(['source_type', 'relation', 'target_type', 'datasourceId'])
     
+    edge_type_mapping = {}
+    edge_mapping = {}
+    
+    edge_type_idx = 0
+    
     for (src_type, relation, dst_type, datasource), group in edge_groups:
         # Create edge type key
         edge_type_key = (src_type, f"{relation}::{datasource}", dst_type)
         
+        # Add to mapping if new
+        if edge_type_key not in edge_type_mapping:
+            edge_type_mapping[edge_type_key] = edge_type_idx
+            edge_type_idx += 1
+            
+        # Store original indices
+        edge_mapping[str(edge_type_key)] = torch.tensor(group.index.values, dtype=torch.long)
+        
         # Map node IDs to indices
-        src_indices = [id_maps[src_type][str(sid)] for sid in group['sourceId']]
-        dst_indices = [id_maps[dst_type][str(tid)] for tid in group['targetId']]
+        src_indices = [node_mapping[src_type][str(sid)] for sid in group['sourceId']]
+        dst_indices = [node_mapping[dst_type][str(tid)] for tid in group['targetId']]
         
         # Create edge_index
         edge_index = torch.tensor(
@@ -193,7 +215,14 @@ def build_hetero_graph(edges: pd.DataFrame) -> Tuple[HeteroData, Dict[str, Dict[
         attr_info = f" ({', '.join(attrs_str)})" if attrs_str else ""
         print(f"✅ Added {num_edges} edges for {edge_type_key}{attr_info}")
     
-    return hetero_data, id_maps
+    mappings = {
+        "node_mapping": node_mapping,
+        "node_type_mapping": node_type_mapping,
+        "edge_type_mapping": edge_type_mapping,
+        "edge_mapping": edge_mapping
+    }
+    
+    return hetero_data, mappings
 
 def build_event_graph(
     event_file: str,
@@ -230,7 +259,7 @@ def build_event_graph(
     
     # Build graph
     # build_hetero_graph now supports edge_time and edge_weight
-    hetero_data, id_maps = build_hetero_graph(events)
+    hetero_data, mappings = build_hetero_graph(events)
     
     # Save
     print(f"\n💾 Saving event graph to {output_file}...")
@@ -238,6 +267,12 @@ def build_event_graph(
     
     torch.save(hetero_data, output_file)
     print(f"✅ Saved HeteroData object")
+    
+    # Save mappings
+    mapping_file = output_file.replace(".pt", "_mappings.pt")
+    print(f"💾 Saving mappings to {mapping_file}...")
+    torch.save(mappings, mapping_file)
+    print(f"✅ Saved mappings object")
     
     # Print summary
     print(f"\n{'='*80}")
