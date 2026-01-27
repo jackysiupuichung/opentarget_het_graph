@@ -4,6 +4,13 @@
 # Experiment name
 experiment_name: "hgt_source_benchmark"
 
+# WandB Logging
+wandb:
+  enabled: false
+  project: "opentargets-graph"
+  entity: null
+  name: null
+
 # Data configuration
 data:
   # Temporal event graph

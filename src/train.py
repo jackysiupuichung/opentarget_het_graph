@@ -9,6 +9,7 @@ import sys
 import argparse
 import torch
 import torch.nn.functional as F
+import wandb
 from omegaconf import OmegaConf
 from pathlib import Path
 from tqdm import tqdm
@@ -19,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from torch_geometric.loader import LinkNeighborLoader
 
 from data.temporal_loader import load_event_graph, get_temporal_masks, filter_graph_by_time, to_time_agnostic
+from src.data import init_wandb
 from models.utils import build_model
 from benchmark.evaluator import Evaluator
 from data.evaluation_prep import build_evaluation_sets
@@ -90,7 +92,6 @@ def main(config_path: str):
     print("="*80 + "\n")
     
     # 1. Config
-    # 1. Config
     # Load base config first
     project_root = os.path.dirname(os.path.dirname(__file__))
     base_cfg = OmegaConf.load(os.path.join(project_root, "config/benchmark_config.yaml"))
@@ -100,6 +101,9 @@ def main(config_path: str):
     
     # Merge: Base <- Experiment (Experiment overrides Base)
     cfg = OmegaConf.merge(base_cfg, exp_cfg)
+    
+    # Initialize WandB
+    init_wandb(cfg)
         
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -298,7 +302,15 @@ def main(config_path: str):
         
         print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Val Regression Loss: {val_loss:.4f}")
         
-    # Validation Ranking (Periodically or every epoch)
+        # Log to WandB
+        if cfg.wandb.enabled:
+            wandb.log({
+                "epoch": epoch,
+                "train_loss": train_loss,
+                "val_regression_loss": val_loss
+            })
+        
+        # Validation Ranking (Periodically or every epoch)
         # We run this to "Monitor" as requested
         print(f"   Running Validation Ranking...")
         
@@ -313,6 +325,10 @@ def main(config_path: str):
             device=device,
             num_negatives=1000 # Default sampling for validation speed
         )
+        
+        # Log Validation Metrics to WandB
+        if cfg.wandb.enabled:
+            wandb.log({f"val_{k}": v for k, v in val_metrics.items()})
         
         # Save Best based on REGRESSION Loss (Primary Objective)
         if val_loss < best_val_loss:
@@ -348,8 +364,16 @@ def main(config_path: str):
         num_negatives=None # Use None for Exhaustive Ranking on Test (Headline Numbers)
     )
     
+    # Log Test Metrics to WandB
+    if cfg.wandb.enabled:
+        wandb.log({f"test_{k}": v for k, v in metrics.items()})
+    
     print("\n✅ Final Test Metrics:")
     print(metrics)
+
+    # Finish WandB run
+    if cfg.wandb.enabled:
+        wandb.finish()
 
 
 if __name__ == "__main__":

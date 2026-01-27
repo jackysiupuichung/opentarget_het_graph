@@ -8,6 +8,7 @@ import sys
 import argparse
 import torch
 import torch.nn.functional as F
+import wandb
 from omegaconf import OmegaConf
 from pathlib import Path
 from tqdm import tqdm
@@ -17,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from torch_geometric.loader import LinkNeighborLoader
 from src.data.temporal_loader import load_event_graph, get_temporal_masks, filter_graph_by_time, to_time_agnostic
+from src.data import init_wandb
 from src.models.utils import build_model
 from src.benchmark.evaluator import Evaluator
 from src.data.evaluation_prep import build_evaluation_sets
@@ -78,6 +80,9 @@ def main(config_path: str):
     except:
         cfg = base_cfg # fallback if no exp config
         
+    # Initialize WandB
+    init_wandb(cfg)
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # 2. Load Data
@@ -205,15 +210,27 @@ def main(config_path: str):
         val_loss = evaluator.validate_regression(model, val_loader, device, supervision_edge_type, src_type, dst_type)
         print(f"Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Val Regression Loss: {val_loss:.4f}")
         
+        # Log to WandB
+        if cfg.wandb.enabled:
+            wandb.log({
+                "epoch": epoch,
+                "train_loss": train_loss,
+                "val_regression_loss": val_loss
+            })
+        
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), f"{evaluator.output_dir}/best_model.pt")
             
             # Run ranking only on improvement or periodicity to save time
-            evaluator.evaluate_ranking(
+            val_metrics = evaluator.evaluate_ranking(
                 model, train_context, val_targets, val_history, val_srcs,
                 supervision_edge_type, hetero_data[dst_type].num_nodes, device
             )
+            
+            # Log Validation Metrics to WandB
+            if cfg.wandb.enabled:
+                wandb.log({f"val_{k}": v for k, v in val_metrics.items()})
             
     print(f"✅ Training Complete. Best Val Loss: {best_val_loss:.4f}")
     
@@ -222,11 +239,19 @@ def main(config_path: str):
     model.load_state_dict(torch.load(f"{evaluator.output_dir}/best_model.pt"))
     model.eval()
     
-    evaluator.evaluate_ranking(
+    metrics = evaluator.evaluate_ranking(
         model, test_context, test_targets, test_history, test_srcs,
         supervision_edge_type, hetero_data[dst_type].num_nodes, device,
         num_negatives=None # Exhaustive
     )
+    
+    # Log Test Metrics to WandB
+    if cfg.wandb.enabled:
+        wandb.log({f"test_{k}": v for k, v in metrics.items()})
+        
+    # Finish WandB run
+    if cfg.wandb.enabled:
+        wandb.finish()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

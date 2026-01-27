@@ -55,6 +55,9 @@ def load_event_graph(
             num_nodes = data[node_type].num_nodes
             id_maps[node_type] = {str(i): i for i in range(num_nodes)}
         
+        # Pass a copy or recreate id_maps if needed, but here we just need to ensure
+        # attach_node_features uses the 'node_id' attribute which is currently in data
+        
         data = attach_node_features(
             data,
             id_maps,
@@ -63,6 +66,14 @@ def load_event_graph(
             seed=seed
         )
     
+
+
+    # Remove node_id attribute if present to avoid PyG loader errors
+    # (PyG loader tries to slice all attributes, and list[str] fails)
+    for node_type in data.node_types:
+        if hasattr(data[node_type], 'node_id'):
+            del data[node_type].node_id
+            
     return data
 
 

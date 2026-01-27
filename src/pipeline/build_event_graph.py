@@ -53,6 +53,57 @@ def load_edges(edge_dir: str, cutoff_year: int = None) -> pd.DataFrame:
     return pd.concat(dfs, ignore_index=True)
 
 
+def load_static_edges(static_dir: str) -> pd.DataFrame:
+    """
+    Load static edges from directory.
+    expected format: sourceId, targetId, source_type, target_type, relation, datasourceId
+    
+    Args:
+        static_dir: Directory containing static edge parquet files
+        
+    Returns:
+        DataFrame with static edges (with default score=1.0 if missing)
+    """
+    if not static_dir or not os.path.exists(static_dir):
+        return pd.DataFrame()
+        
+    print(f"\n📂 Loading static edges from {static_dir}...")
+    dfs = []
+    
+    for parquet_file in glob(os.path.join(static_dir, "*.parquet")):
+        try:
+            df = pd.read_parquet(parquet_file)
+            if df.empty: continue
+            
+            # Ensure required columns
+            required = ['sourceId', 'targetId', 'source_type', 'target_type', 'relation', 'datasourceId']
+            if not all(c in df.columns for c in required):
+                print(f"⚠️ Skipping {Path(parquet_file).name}: Missing required columns")
+                continue
+                
+            # Add default score if missing
+            if 'score' not in df.columns:
+                df['score'] = 1.0
+                
+            # Ensure no temporal columns interfere (force them to be null or handled)
+            # Static edges have NO edge_time
+            if 'edge_time' in df.columns:
+                df = df.drop(columns=['edge_time'])
+                
+            dfs.append(df)
+            print(f"   Loaded {len(df):,} edges from {Path(parquet_file).name}")
+            
+        except Exception as e:
+            print(f"❌ Error loading {parquet_file}: {e}")
+            
+    if not dfs:
+        return pd.DataFrame()
+        
+    combined = pd.concat(dfs, ignore_index=True)
+    print(f"✅ Total static edges: {len(combined):,}")
+    return combined
+
+
 def extract_nodes_from_edges(edges: pd.DataFrame) -> Tuple[Dict[str, List[str]], Dict[str, str]]:
     """
     Extract unique nodes from edges.
@@ -226,7 +277,8 @@ def build_hetero_graph(edges: pd.DataFrame) -> Tuple[HeteroData, Dict]:
 
 def build_event_graph(
     event_file: str,
-    output_file: str
+    output_file: str,
+    static_edges_dir: str = None
 ):
     """
     Build HeteroData from event list.
@@ -257,9 +309,34 @@ def build_event_graph(
         print(f"❌ Missing columns: {missing}")
         return
     
+    # Load static edges
+    static_edges = pd.DataFrame()
+    if static_edges_dir:
+        static_edges = load_static_edges(static_edges_dir)
+        
+    # Combine
+    # Note: Static edges have NaNs for edge_time and edge_weight (unless score mapped check)
+    # We should normalize columns before concat
+    
+    all_edges = events
+    
+    if not static_edges.empty:
+        print("\n➕ Merging static edges...")
+        # Align columns
+        common_cols = ['sourceId', 'targetId', 'source_type', 'target_type', 'relation', 'datasourceId']
+        
+        # Ensure static has score mapped to edge_weight or score?
+        # events has edge_weight. static has score.
+        # Let's map static score to edge_weight for consistency if feasible, OR keep them separate?
+        # build_hetero_graph handles both edge_weight and score.
+        
+        # Concat
+        all_edges = pd.concat([events, static_edges], ignore_index=True)
+        print(f"   Combined Total: {len(all_edges):,} edges")
+    
     # Build graph
     # build_hetero_graph now supports edge_time and edge_weight
-    hetero_data, mappings = build_hetero_graph(events)
+    hetero_data, mappings = build_hetero_graph(all_edges)
     
     # Save
     print(f"\n💾 Saving event graph to {output_file}...")
@@ -303,12 +380,19 @@ def main():
         default="output/progression/temporal_graph.pt",
         help="Output .pt file"
     )
+    parser.add_argument(
+        "--static-edges",
+        type=str,
+        default=None,
+        help="Directory containing static edge parquets"
+    )
     
     args = parser.parse_args()
     
     build_event_graph(
         event_file=args.input,
-        output_file=args.output
+        output_file=args.output,
+        static_edges_dir=args.static_edges
     )
 
 

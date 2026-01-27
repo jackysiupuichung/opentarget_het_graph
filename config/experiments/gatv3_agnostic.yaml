@@ -15,8 +15,8 @@ data:
 model:
   name: "gatv3"
   node_features:
-    init_method: "random"
-    embedding_dim: 128
+    init_method: "pretrained"
+    embedding_dim: 60
   hgt:
     hidden_dim: 128
     num_heads: 4
