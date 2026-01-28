@@ -214,30 +214,35 @@ def build_integrated_features(base_dir: Path, output_path: str, target_ids: list
         combined = torch.cat([v_prio, v_rna])
         integrated_dict[key] = combined
     
-    # Compute per-column statistics for Prio features
+    # Compute per-column statistics for Prio features ONLY
     if prio_feats:
-        print(f"\n   📊 Prio Feature Statistics (per column):")
+        print(f"\n   📊 Prio Feature Statistics (target_prioritisation_features only):")
         all_prio_stacked = torch.stack(list(prio_feats.values()))  # [num_targets, num_features]
         
-        # Get feature names from the original dataframe
-        feat_cols = [c for c in prio_df.columns if c != 'targetId']
-        
-        for i, col_name in enumerate(feat_cols):
+        # Use the global target_prioritisation_features list
+        for i, col_name in enumerate(target_prioritisation_features):
+            if i >= all_prio_stacked.shape[1]:
+                print(f"      [{i}] {col_name:45s} | NOT FOUND IN DATA")
+                continue
+                
             col_values = all_prio_stacked[:, i]
             
-            # Compute statistics
-            col_mean = col_values.mean().item()
-            col_std = col_values.std().item()
-            col_min = col_values.min().item()
-            col_max = col_values.max().item()
-            
-            # Count NaNs in original data
+            # Filter out NaNs for statistics computation
+            valid_values = col_values[~torch.isnan(col_values)]
             nan_count = torch.isnan(col_values).sum().item()
             
-            print(f"      [{i}] {col_name:45s} | "
-                  f"mean={col_mean:8.4f}, std={col_std:8.4f}, "
-                  f"min={col_min:8.4f}, max={col_max:8.4f}, "
-                  f"NaNs={nan_count}/{len(col_values)}")
+            if len(valid_values) > 0:
+                col_mean = valid_values.mean().item()
+                col_std = valid_values.std().item()
+                col_min = valid_values.min().item()
+                col_max = valid_values.max().item()
+                
+                print(f"      [{i}] {col_name:45s} | "
+                      f"mean={col_mean:8.4f}, std={col_std:8.4f}, "
+                      f"min={col_min:8.4f}, max={col_max:8.4f}, "
+                      f"NaNs={nan_count}/{len(col_values)} ({nan_count/len(col_values)*100:.1f}%)")
+            else:
+                print(f"      [{i}] {col_name:45s} | ALL NaN ({len(col_values)} values)")
     
     print(f"\n   Feature Coverage:")
     print(f"   - Missing Prio: {missing_prio}/{len(all_keys)} ({missing_prio/len(all_keys)*100:.1f}%)")
