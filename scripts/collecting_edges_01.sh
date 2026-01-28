@@ -1,7 +1,7 @@
 #!/bin/bash
 #$ -pe smp 1
 #$ -l h_vmem=32G
-#$ -l h_rt=240:0:0
+#$ -l h_rt=1:0:0
 #$ -cwd
 #$ -j y
 
@@ -15,12 +15,14 @@ CONFIG="config/event_graph_config.yaml"
 
 # --- Input ---
 INPUT_EVIDENCE_DIR="/data/scratch/bty414/opentarget_evidences/23.06/evidenceDated/"
+# INPUT_EVIDENCE_DIR="data/evidenceDated_subset/23.06"
 NODE_SCHEMA="config/node_schema.yaml"
 EDGE_SCHEMA="config/edge_schema.yaml"
 STATIC_EDGE_SCHEMA="config/static_edge_schema.yaml"
 
 # --- Output ---
 OUTPUT_BASE="/data/scratch/bty414/opentarget_evidences/23.06"
+# OUTPUT_BASE="output"
 KG_OUTPUT_DIR="${OUTPUT_BASE}/evidences"
 RAW_EDGES_DIR="${KG_OUTPUT_DIR}/edges"
 RAW_NODES_DIR="${KG_OUTPUT_DIR}/nodes"
