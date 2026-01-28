@@ -198,19 +198,21 @@ class NodeParser(BaseParser):
         if name == "targets" and "biotype" in df.columns:
             df = df[df["biotype"] == "protein_coding"]
         
-        # New: Filter molecules for valid SMILES AND Small molecule type
+        # Filter molecules for valid SMILES AND Small molecule type
         if name == "molecule" and "canonicalSmiles" in df.columns:
-            # Keep only those with valid, non-empty SMILES
             valid_stats = len(df)
+            
+            # Keep only valid, non-empty SMILES
             df = df[df["canonicalSmiles"].notna() & (df["canonicalSmiles"].str.strip() != "")]
-            # Filter 'None' strings if they exist
-            df = df[df["canonicalSmiles"] != "None"]
+            
+            # Filter out 'None' strings (case-insensitive)
+            df = df[~df["canonicalSmiles"].str.lower().isin(["none", "null", "nan"])]
             
             # Also filter by drugType if available
             if "drugType" in df.columns:
                 df = df[df["drugType"] == "Small molecule"]
             
-            print(f"  filtered molecules: {valid_stats} -> {len(df)} (Small molecule with SMILES)")
+            print(f"  filtered molecules: {valid_stats} -> {len(df)} (Small molecule with valid SMILES)")
 
         return df
 

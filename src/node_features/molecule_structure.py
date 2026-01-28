@@ -55,25 +55,6 @@ def load_drug_parquets(
 
 
 # -------------------------------------------------
-# BIOLOGIC / PEPTIDE HEURISTIC
-# -------------------------------------------------
-def is_biologic_or_peptide(smiles: str, max_len: int) -> bool:
-    """
-    Simple heuristic:
-    - very long SMILES
-    - RDKit cannot parse
-    """
-    if len(smiles) > max_len:
-        return True
-
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return True
-
-    return False
-
-
-# -------------------------------------------------
 # MORGAN FINGERPRINT
 # -------------------------------------------------
 def smiles_to_morgan_fp(
@@ -88,12 +69,6 @@ def smiles_to_morgan_fp(
     # Use modern generator to avoid deprecation warning
     gen = AllChem.GetMorganGenerator(radius=radius, fpSize=n_bits)
     fp = gen.GetFingerprint(mol)
-
-    # Convert to explicit bits (the new API returns an ExplicitBitVect directly, same as before)
-    # But let's be safe. DataStructs.ConvertToNumpyArray works on ExplicitBitVect.
-    
-    # NOTE: rdkit.Chem.AllChem.GetMorganGenerator returns a generator object.
-    # The method is GetFingerprint which returns an ExplicitBitVect.
 
 
     arr = np.zeros((n_bits,), dtype=np.int8)
@@ -115,41 +90,21 @@ def build_drug_embeddings(args: argparse.Namespace, kg_ids: list = None) -> Dict
 
     embeddings: Dict[str, np.ndarray] = {}
     skipped_stats = {
-        "not_small_molecule": 0,
         "missing_smiles": 0,
-        "long_smiles": 0,
         "rdkit_error": 0,
-        "missing_from_source": 0 # For IDs in kg_ids but not in source files
     }
     
-    # Check if we have drugType
-    has_drug_type = "drugType" in df.columns
-
     # 1. Generate valid embeddings first
-    print("\n   Generating embeddings for valid small molecules...")
+    print("\n   Generating Morgan fingerprints for all molecules...")
     valid_vectors = []
     
     for _, row in df.iterrows():
         drug_id = row[args.id_col]
         smiles = row[args.smiles_col]
         
-        # 1. Check Drug Type (for stats only - do NOT skip yet)
-        if has_drug_type:
-            drug_type = row.get("drugType", "")
-            if drug_type != "Small molecule":
-                skipped_stats["not_small_molecule"] += 1
-                # We used to continue here, but now we try to use SMILES if present
-                # continue 
-        
-        # 2. Check SMILES existence
+        # Check SMILES existence
         if not isinstance(smiles, str) or not smiles.strip():
             skipped_stats["missing_smiles"] += 1
-            # Only skip if NO smiles
-            continue
-
-        # Check for Biologics / Peptide Heuristic
-        if len(smiles) > args.max_smiles_len:
-            skipped_stats["long_smiles"] += 1
             continue
             
         # Generate Fingerprint
@@ -183,11 +138,6 @@ def build_drug_embeddings(args: argparse.Namespace, kg_ids: list = None) -> Dict
             if mid not in embeddings:
                 embeddings[mid] = mean_vector
                 imputed_count += 1
-                
-        # Update skipping stats for provenance (reasons tracked above)
-        # Plus 'missing_from_source' implies they weren't even in the DF
-        # We can't easily attribute 'why' for those not in DF without checking source again, 
-        # so we just lump them. 
         
         print(f"   Imputed {imputed_count:,} molecules (Total requested: {len(kg_ids):,})")
 
@@ -265,13 +215,6 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--fp-dim", type=int, default=1024)
     parser.add_argument("--radius", type=int, default=2)
-
-    parser.add_argument(
-        "--max-smiles-len",
-        type=int,
-        default=300,
-        help="Above this length treated as biologic/peptide",
-    )
 
     return parser.parse_args()
 
