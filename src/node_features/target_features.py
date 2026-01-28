@@ -35,11 +35,6 @@ def build_target_prioritisation_features(
     
     df_feats = df.set_index('targetId')[available_cols]
     
-    # Handle NaNs: 
-    # Mean imputation for numeric columns
-    print("   Performing mean imputation for missing values...")
-    df_feats = df_feats.fillna(df_feats.mean())
-    
     # Convert to Tensor Dictionary
     feature_dict = {}
     for target_id, row in df_feats.iterrows():
@@ -218,6 +213,31 @@ def build_integrated_features(base_dir: Path, output_path: str, target_ids: list
         
         combined = torch.cat([v_prio, v_rna])
         integrated_dict[key] = combined
+    
+    # Compute per-column statistics for Prio features
+    if prio_feats:
+        print(f"\n   📊 Prio Feature Statistics (per column):")
+        all_prio_stacked = torch.stack(list(prio_feats.values()))  # [num_targets, num_features]
+        
+        # Get feature names from the original dataframe
+        feat_cols = [c for c in prio_df.columns if c != 'targetId']
+        
+        for i, col_name in enumerate(feat_cols):
+            col_values = all_prio_stacked[:, i]
+            
+            # Compute statistics
+            col_mean = col_values.mean().item()
+            col_std = col_values.std().item()
+            col_min = col_values.min().item()
+            col_max = col_values.max().item()
+            
+            # Count NaNs in original data
+            nan_count = torch.isnan(col_values).sum().item()
+            
+            print(f"      [{i}] {col_name:45s} | "
+                  f"mean={col_mean:8.4f}, std={col_std:8.4f}, "
+                  f"min={col_min:8.4f}, max={col_max:8.4f}, "
+                  f"NaNs={nan_count}/{len(col_values)}")
     
     print(f"\n   Feature Coverage:")
     print(f"   - Missing Prio: {missing_prio}/{len(all_keys)} ({missing_prio/len(all_keys)*100:.1f}%)")
