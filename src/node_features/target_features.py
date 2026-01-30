@@ -138,11 +138,12 @@ def build_integrated_features(base_dir: Path, output_path: str, target_ids: list
             prio_feats = {}
             for _, row in prio_df.iterrows():
                 target_id = str(row['targetId'])
-                # Extract feature columns (exclude targetId)
-                feat_cols = [c for c in prio_df.columns if c != 'targetId']
+                # Extract ONLY the specified target_prioritisation_features
+                feat_cols = [c for c in target_prioritisation_features if c in prio_df.columns]
                 feat_vals = row[feat_cols].values.astype(float)  # Convert to float first
                 prio_feats[target_id] = torch.tensor(feat_vals, dtype=torch.float)
             print(f"   Loaded {len(prio_feats)} targets from prioritisation")
+            print(f"   Using features: {feat_cols}")
         else:
             raise ValueError(f"No prioritisation files found at {prio_path}")
     else:
