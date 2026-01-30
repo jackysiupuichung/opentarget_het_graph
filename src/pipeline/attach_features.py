@@ -27,7 +27,7 @@ def load_feature_embeddings(feature_dir: Path, node_type: str):
         'target': 'integrated_target_features.pt',
         'go': 'go_embeddings.pt',
         'reactome': 'reactome_embeddings.pt',
-        'molecule': 'molecule_fingerprints.pt'
+        'molecule': 'molecule_morgan_fingerprints.pt'
     }
     
     if node_type not in feature_files:
