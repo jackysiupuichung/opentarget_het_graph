@@ -28,6 +28,7 @@ def subset_embeddings(
 ):
     """
     Subset learned embeddings to only include nodes in the graph.
+    Imputes missing nodes with mean embedding.
     
     Args:
         full_embeddings_path: Path to full embeddings .pt file
@@ -46,9 +47,27 @@ def subset_embeddings(
     graph_ids = set(df['id'].tolist())
     print(f"      Graph nodes: {len(graph_ids):,} nodes")
     
-    # Subset embeddings
+    # Subset embeddings (nodes that exist in both)
     subset_emb = {nid: emb for nid, emb in full_emb.items() if nid in graph_ids}
-    print(f"      Subset embeddings: {len(subset_emb):,} nodes")
+    print(f"      Found embeddings: {len(subset_emb):,} nodes")
+    
+    # Find missing nodes
+    missing_ids = graph_ids - set(subset_emb.keys())
+    
+    if missing_ids:
+        print(f"      ⚠️  Missing {len(missing_ids):,} nodes ({len(missing_ids)/len(graph_ids)*100:.1f}%)")
+        
+        # Compute mean embedding for imputation
+        all_embeddings = torch.stack(list(full_emb.values()))
+        mean_embedding = all_embeddings.mean(dim=0)
+        
+        # Impute missing nodes
+        for nid in missing_ids:
+            subset_emb[nid] = mean_embedding
+        
+        print(f"      ✅ Imputed missing nodes with mean embedding")
+    
+    print(f"      Final embeddings: {len(subset_emb):,} nodes")
     
     # Save subset
     torch.save(subset_emb, output_path)
