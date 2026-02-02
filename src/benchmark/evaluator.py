@@ -96,7 +96,8 @@ class Evaluator:
         num_dst_nodes: int,
         device,
         num_negatives: int = 1000,
-        batch_size_eval: int = 10000 
+        batch_size_eval: int = 10000,
+        validation_src_filter: Optional[List[int]] = None
     ) -> Dict[str, float]:
         """
         Ranking evaluation with filtering of historical edges.
@@ -112,10 +113,24 @@ class Evaluator:
             device: torch device
             num_negatives: Number of negative samples. If None or <= 0, use exhaustive.
             batch_size_eval: Batch size for scoring candidates
+            validation_src_filter: Optional list of source node IDs to filter evaluation to (e.g., validation diseases)
             
         Returns:
             Dict of metrics
         """
+        # Filter to validation sources if specified
+        if validation_src_filter is not None:
+            validation_set = set(validation_src_filter)
+            filtered_test_srcs = [src for src in unique_test_srcs if src in validation_set]
+            filtered_test_targets = {src: targets for src, targets in test_targets_dict.items() if src in validation_set}
+            
+            print(f"\n🔍 Filtering to {len(validation_src_filter)} validation source nodes...")
+            print(f"   Sources with test edges: {len(filtered_test_srcs)} / {len(validation_src_filter)}")
+            print(f"   Total test edges: {sum(len(v) for v in filtered_test_targets.values())}")
+            
+            unique_test_srcs = filtered_test_srcs
+            test_targets_dict = filtered_test_targets
+        
         mode = "Negative Sampling" if num_negatives and num_negatives > 0 else "Exhaustive"
         print(f"\n🔍 Evaluating Ranking ({mode}) on {len(unique_test_srcs)} unique source nodes...")
         
