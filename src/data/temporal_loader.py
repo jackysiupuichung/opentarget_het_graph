@@ -229,13 +229,6 @@ def to_time_agnostic(data: HeteroData) -> HeteroData:
                 new_data[et].edge_attr = new_attr
                 
         else:
-            # Just unique edges (no weights)
-            # coalesce without attr works? No, it expects attr or you use unique.
-            # torch_geometric.utils.coalesce requires edge_attr? 
-            # Actually, if edge_attr is None, it returns (edge_index, None) if provided?
-            # Documentation says: "If edge_attr is None, it will be ignored."?
-            # Actually, `coalesce(edge_index, edge_attr=None, ...)` returns `edge_index`.
-            
             new_index = coalesce(
                 edge_index, 
                 None
