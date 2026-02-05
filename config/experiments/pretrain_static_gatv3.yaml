@@ -1,0 +1,35 @@
+experiment:
+  name: pretrain_static_gatv3
+
+model:
+  name: gatv3
+  hidden_dim: 128
+  num_layers: 2
+  num_heads: 4
+  dropout: 0.1
+
+data:
+  graph_file: output/graph/hetero_graph_with_features_sample.pt
+
+pretrain:
+  num_epochs: 100
+  lr: 0.001
+  weight_decay: 0.0001
+  batch_size: 512
+  num_neighbors: [20, 10]
+  neg_sampling_ratio: 1.0
+  num_neg_samples: 1
+  num_workers: 4
+  early_stopping_patience: 10
+  output_dir: runs/pretrain_static_gatv3
+  
+  # Temporal split configuration (accumulative snapshots)
+  temporal_split:
+    train: [1990, 2015]
+    val: [2016, 2017]
+    test: [2018, 2024]
+
+wandb:
+  enabled: false
+  project: opentarget_pretrain
+  entity: null
