@@ -1,0 +1,34 @@
+experiment:
+  name: pretrain_event_tgn_gatv2
+
+model:
+  name: tgn
+  backbone: gatv2
+  hidden_dim: 128
+  memory_dim: 128
+  time_dim: 128
+  num_layers: 2
+  num_heads: 4
+  dropout: 0.1
+
+data:
+  graph_file: output/graph/hetero_graph_with_features.pt
+
+pretrain:
+  num_epochs: 100
+  lr: 0.001
+  weight_decay: 0.0001
+  num_neg_samples: 1
+  early_stopping_patience: 10
+  output_dir: runs/pretrain_event_tgn_gatv2
+  
+  # Temporal split configuration
+  temporal_split:
+    train: [1990, 2015]
+    val: [2016, 2017]
+    test: [2018, 2024]
+
+wandb:
+  enabled: false
+  project: opentarget_pretrain
+  entity: null
