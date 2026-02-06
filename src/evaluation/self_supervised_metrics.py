@@ -50,17 +50,19 @@ def create_negative_samples_pyg(
     # Repeat positive edges
     neg_edge_index = pos_edge_index.repeat(1, num_neg_per_pos)
     
+    device = pos_edge_index.device
+    
     if mode == 'src':
         # Replace source nodes with random nodes
-        neg_edge_index[0] = torch.randint(0, num_src_nodes, (total_neg,))
+        neg_edge_index[0] = torch.randint(0, num_src_nodes, (total_neg,), device=device)
     elif mode == 'dst':
         # Replace destination nodes with random nodes
-        neg_edge_index[1] = torch.randint(0, num_dst_nodes, (total_neg,))
+        neg_edge_index[1] = torch.randint(0, num_dst_nodes, (total_neg,), device=device)
     elif mode == 'both':
         # Randomly choose to replace source or destination for each edge
-        replace_src = torch.rand(total_neg) < 0.5
-        neg_edge_index[0, replace_src] = torch.randint(0, num_src_nodes, (replace_src.sum(),))
-        neg_edge_index[1, ~replace_src] = torch.randint(0, num_dst_nodes, ((~replace_src).sum(),))
+        replace_src = torch.rand(total_neg, device=device) < 0.5
+        neg_edge_index[0, replace_src] = torch.randint(0, num_src_nodes, (replace_src.sum(),), device=device)
+        neg_edge_index[1, ~replace_src] = torch.randint(0, num_dst_nodes, ((~replace_src).sum(),), device=device)
     else:
         raise ValueError(f"Invalid mode: {mode}. Must be 'src', 'dst', or 'both'")
     
