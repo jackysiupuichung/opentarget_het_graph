@@ -229,30 +229,26 @@ def train_one_epoch(
                 pos_mask = (targets > 0)
                 
                 if pos_mask.sum() > 0:
-                    # Select logits and targets for positives
-                    prob_logits_pos = logits_prob[pos_mask]
-                    prob_targets_pos = targets[pos_mask]
+                    # Only train Head B for non-binary tasks (MSE/Huber)
+                    # For binary tasks (BCE), existence (Head A) is sufficient supervision.
+                    if edge_loss_config[etype] != 'bce':
+                        # Select logits and targets for positives
+                        prob_logits_pos = logits_prob[pos_mask]
+                        prob_targets_pos = targets[pos_mask]
+                        
+                        # Soft-label BCE for probability regression
+                        loss_prob = F.binary_cross_entropy_with_logits(prob_logits_pos, prob_targets_pos)
+                    else:
+                         loss_prob = torch.tensor(0.0, device=device)
                     
-                    # Soft-label BCE
-                    loss_prob = F.binary_cross_entropy_with_logits(prob_logits_pos, prob_targets_pos)
-                    
-                    # DEBUG: Check why loss_prob might be 0
-                    if loss_prob.item() < 1e-5 and torch.rand(1).item() < 0.01: # Sample prints
-                         print(f"DEBUG {etype}: targets_mean={targets.mean():.4f}, pos_sum={pos_mask.sum()}, prob_loss={loss_prob.item():.6f}")
                 else:
-                    if torch.rand(1).item() < 0.01:
-                        print(f"DEBUG {etype}: No positive targets! targets_mean={targets.mean():.4f}")
                     loss_prob = torch.tensor(0.0, device=device)
                     
-                # ---------------------------------------------------------
                 # proper composite loss
                 # ---------------------------------------------------------
                 # hardcoded lambdas for now (1.0 each)
                 loss = loss_exist + loss_prob
                 
-                loss_breakdown['exist'] += loss_exist.item()
-                loss_breakdown['prob'] += loss_prob.item()
-
             else:
                 # Fallback for single-head models (e.g. legacy HGT)
                 # Treats output as existence logits
@@ -262,17 +258,25 @@ def train_one_epoch(
             loss.backward()
             optimizer.step()
             
-            total_loss += loss.item() * batch[etype].edge_label_index.size(1)
-            total_examples += batch[etype].edge_label_index.size(1)
+            batch_size = batch[etype].edge_label_index.size(1)
+            total_loss += loss.item() * batch_size
+            total_examples += batch_size
             num_batches += 1
+            
+            # Weighted accumulation for components
+            if isinstance(out, dict):
+                loss_breakdown['exist'] += loss_exist.item() * batch_size
+                loss_breakdown['prob'] += loss_prob.item() * batch_size
+            else:
+                loss_breakdown['exist'] += loss.item() * batch_size
             
             # Update progress bar
             pbar.set_postfix({'loss': f'{loss.item():.4f}'})
     
     # Average loss breakdown
-    if num_batches > 0:
-        loss_breakdown['exist'] /= num_batches
-        loss_breakdown['prob'] /= num_batches
+    if total_examples > 0:
+        loss_breakdown['exist'] /= total_examples
+        loss_breakdown['prob'] /= total_examples
     
     avg_loss = total_loss / total_examples if total_examples > 0 else 0.0
     return avg_loss, loss_breakdown
