@@ -249,7 +249,7 @@ def train_one_epoch(
                 if hasattr(batch[et], 'edge_time'):
                     actual_edge_time_dict[et] = batch[et].edge_time
 
-            pred_scores = model(
+            out = model(
                 batch.x_dict,
                 batch.edge_index_dict,
                 actual_edge_time_dict,
@@ -260,19 +260,61 @@ def train_one_epoch(
                 dst_type
             )
             
-            # Loss
-            if loss_type == 'bce':
-                targets = batch[etype].edge_label.float()
-                loss = F.binary_cross_entropy_with_logits(pred_scores[:targets.size(0)], targets)
+            targets = batch[etype].edge_label.float()
+            
+            # ------------------------------------------------------------------
+            # Dual-Head Logic (Existence + Probability)
+            # ------------------------------------------------------------------
+            loss_exist = torch.tensor(0.0, device=device)
+            loss_prob = torch.tensor(0.0, device=device)
+            
+            if isinstance(out, dict):
+                logits_exist = out['logits_exist']
+                logits_prob = out['logits_prob']
+                
+                # Truncate targets if needed
+                num_preds = logits_exist.size(0)
+                targets = targets[:num_preds]
+                
+                # Head A: Existence (Binary Discovery)
+                exist_targets = (targets > 0).float()
+                loss_exist = F.binary_cross_entropy_with_logits(logits_exist, exist_targets)
+                
+                # Head B: Probability (Calibrated Strength)
+                # Only apply for regression tasks (non-BCE)
+                # For BCE (binary) tasks, existence supervision is sufficient.
+                if loss_type != 'bce':
+                    pos_mask = (targets > 0)
+                    if pos_mask.sum() > 0:
+                        prob_logits_pos = logits_prob[pos_mask]
+                        prob_targets_pos = targets[pos_mask]
+                        
+                        # Use appropriate loss for regression
+                        # Although logits_prob is usually passed to BCEWithLogits for [0,1] regression
+                        # If loss_type is huber, we might want huber on SIGMOID(logits)?
+                        # Or consistent with static: BCEWithLogits on soft labels.
+                        loss_prob = F.binary_cross_entropy_with_logits(prob_logits_pos, prob_targets_pos)
+                    else:
+                        loss_prob = torch.tensor(0.0, device=device)
+                else:
+                    loss_prob = torch.tensor(0.0, device=device)
+                    
+                loss = loss_exist + loss_prob
+                
             else:
-                targets = batch[etype].edge_label.flatten()
-                loss = F.huber_loss(pred_scores[:targets.size(0)], targets)
+                # Fallback for single-head models
+                if loss_type == 'bce':
+                    loss = F.binary_cross_entropy_with_logits(out[:targets.size(0)], targets)
+                else:
+                    loss = F.huber_loss(out[:targets.size(0)], targets.flatten())
+                loss_exist = loss
             
             loss.backward()
             optimizer.step()
             
-            total_loss += loss.item() * batch[etype].edge_label_index.size(1)
-            total_examples += batch[etype].edge_label_index.size(1)
+            batch_size = batch[etype].edge_label_index.size(1)
+            total_loss += loss.item() * batch_size
+            total_examples += batch_size
             
     return total_loss / total_examples if total_examples > 0 else 0.0
 
