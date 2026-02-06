@@ -13,11 +13,10 @@ source .venv/bin/activate
 
 
 
-# Enable WandB Offline Mode
-export WANDB_MODE=offline
+
 
 echo "================================================================================"
-echo "RUNNING STATIC SELF-SUPERVISED PRETRAINING (WANDB OFFLINE)"
+echo "RUNNING STATIC SELF-SUPERVISED PRETRAINING"
 echo "================================================================================"
 
 # 1. HGT Pretrain

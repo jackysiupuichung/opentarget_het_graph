@@ -272,13 +272,10 @@ def train_one_epoch(
     return avg_loss, loss_breakdown
 
 
-def main(config_path):
+def main(cfg):
     print("\n" + "="*80)
     print("STATIC SELF-SUPERVISED PRETRAINING")
     print("="*80 + "\n")
-    
-    # Load config
-    cfg = OmegaConf.load(config_path)
     
     # Initialize WandB
     if cfg.wandb.enabled:
@@ -563,5 +560,12 @@ def main(config_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Static self-supervised pretraining")
     parser.add_argument("--config", required=True, help="Path to config file")
+    parser.add_argument("opts", nargs=argparse.REMAINDER, help="Additional key=value options")
     args = parser.parse_args()
-    main(args.config)
+    
+    # Load config and merge CLI args
+    cfg = OmegaConf.load(args.config)
+    cli_conf = OmegaConf.from_cli(args.opts)
+    cfg = OmegaConf.merge(cfg, cli_conf)
+    
+    main(cfg)
