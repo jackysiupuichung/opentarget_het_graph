@@ -1,0 +1,61 @@
+experiment:
+  name: event_hgt
+
+wandb:
+  enabled: false
+  project: opentargets-graph
+  entity: null
+
+data:
+  # Temporal event graph
+  graph_file: output/graph/hetero_graph_with_features.pt
+  mappings_file: output/graph/hetero_mappings.pt
+  
+  # Temporal split configuration
+  temporal_split:
+    train: [2000, 2016]
+    val: [2017, 2017]
+    test: [2018, 2025]
+    
+  graph:
+    mode: "event"
+    # Supervision task (link prediction target)
+    supervision:
+      src_type: "disease"
+      relation: "clinical_trial::chembl"
+      dst_type: "target"
+
+model:
+  name: hgt
+  # Node features
+  node_features:
+    init_method: "random"
+    embedding_dim: 128
+  
+  # HGT architecture
+  hgt:
+    hidden_dim: 128
+    num_heads: 4
+    num_layers: 2
+    dropout: 0.1
+
+train:
+  batch_size: 512
+  num_epochs: 10
+  lr: 0.001
+  weight_decay: 0.0
+  seed: 42
+  
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 10
+    monitor: "val_loss"
+
+eval:
+  k_values: [200, 500]
+  
+  # Cold start evaluation
+  cold_start:
+    enabled: false
+    min_interactions: 5
