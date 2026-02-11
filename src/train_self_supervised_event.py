@@ -55,110 +55,6 @@ def get_edge_loss_type(graph, edge_type):
     return 'bce' if is_binary else 'huber'
 
 
-class TimeEncoder(nn.Module):
-    """Encodes time differences using sinusoidal embeddings."""
-    def __init__(self, out_channels):
-        super().__init__()
-        self.out_channels = out_channels
-        self.lin = nn.Linear(1, out_channels)
-
-    def forward(self, t):
-        return self.lin(t.view(-1, 1)).cos()
-
-
-class TemporalGNNWrapper(nn.Module):
-    """
-    Wraps a static GNN to inject temporal encodings into edge features.
-    
-    Logic:
-    1. Compute delta_t = node_time[dst] - edge_time
-    2. Encode delta_t using TimeEncoder
-    3. Concatenate to edge_attr
-    4. Pass to GNN
-    """
-    def __init__(self, gnn_model, time_dim=16):
-        super().__init__()
-        self.gnn = gnn_model
-        self.time_encoder = TimeEncoder(time_dim)
-        self.time_dim = time_dim
-
-    def forward(self, x_dict, edge_index_dict, edge_time_dict, node_time_dict, edge_attr_dict, edge_label_index, src_type, dst_type):
-        """
-        Args:
-            x_dict: Node features
-            edge_index_dict: Edge indices (Adjacency)
-            edge_time_dict: Time of edges in the subgraph
-            node_time_dict: Time of nodes in the subgraph (from LinkNeighborLoader)
-            edge_attr_dict: Original edge attributes
-            ...
-        """
-        
-        # Prepare edge attributes with time encoding
-        new_edge_attr_dict = {}
-        
-        for etype, edge_index in edge_index_dict.items():
-            src_t, _, dst_t = etype
-            
-            # Get edge times
-            if etype in edge_time_dict:
-                e_time = edge_time_dict[etype]
-            else:
-                # If static edge, use 0 or dummy? 
-                # Ideally static edges have e_time=0 or similar.
-                # Assuming batch has it if loader provided it.
-                # If missing, we assume 0 delta.
-                e_time = torch.zeros(edge_index.size(1), device=edge_index.device)
-
-            # Get Node times (Target node time represents the "current" time for the interaction)
-            # In LinkNeighborLoader with 'last', nodes have timestamps.
-            # Using destination node time roughly approximates the interaction time for incoming edges?
-            if dst_t in node_time_dict:
-                # Map dst indices to their times
-                # edge_index[1] contains destination node indices in the batch
-                dst_nodes = edge_index[1]
-                n_time = node_time_dict[dst_t][dst_nodes]
-                
-                # Delta T (how long ago did this neighbor interaction happen?)
-                delta_t = (n_time - e_time).float()
-                # Clip negative values (shouldn't happen with causal sampling but good for safety)
-                delta_t = torch.clamp(delta_t, min=0)
-            else:
-                delta_t = torch.zeros_like(e_time).float()
-
-            # Encode
-            t_emb = self.time_encoder(delta_t)
-            
-            # Concatenate with existing edge attributes
-            if etype in edge_attr_dict and edge_attr_dict[etype] is not None:
-                orig_attr = edge_attr_dict[etype]
-                # Ensure 2D
-                if orig_attr.dim() == 1: orig_attr = orig_attr.view(-1, 1)
-                new_attr = torch.cat([orig_attr, t_emb], dim=1)
-            else:
-                new_attr = t_emb
-                
-            new_edge_attr_dict[etype] = new_attr
-        
-        # Pass to GNN using the new edge attributes
-        # Note: GNN must handle the increased edge dim!
-        # This requires the underlying GAT/HGT to be initialized with edge_dim + time_dim
-        # We handle this by passing the augmented dict.
-        
-        # The build_model function initializes the model. 
-        # We need to ensure the model *expects* this dimension.
-        # Ideally, we'd wrap the `metadata` passed to build_model to adjust edge_dim.
-        # But `build_model` takes `data`.
-        # HACK: We can't easily change the model structure dynamically here without changing `build_model`.
-        # fallback: for now, just pass to model and hope it aligns, OR 
-        # simpler: Don't cat, just add? No, dims differ.
-        # If model expects edge_dim=1, and we pass 17, it will fail.
-        
-        # Solution: Rely on the GNN to project edge features (GATv2 often does Linear(edge_dim)).
-        # But we instantiated the model based on the *original* graph.
-        # We must instantiate the model with the *expected* dimension.
-        
-        return self.gnn(x_dict, edge_index_dict, edge_label_index, src_type, dst_type, edge_attr_dict=new_edge_attr_dict)
-
 
 def prepare_event_splits(
     temporal_graph,
@@ -192,10 +88,7 @@ def prepare_event_splits(
         edge_attr = temporal_graph[etype].edge_attr if 'edge_attr' in temporal_graph[etype] else None
         
         if edge_time is None:
-            # Skip static edges for temporal training? or include them with dummy time?
-            # Usually static edges are context, not supervision targets in event forecasting.
-            # We skip standard supervision on static edges for event pretraining.
-            continue
+            raise AttributeError(f"Edge type {etype} is missing edge_time attribute.")
             
         # Extract
         for mode, mask in [('train', train_mask), ('val', val_mask), ('test', test_mask)]:
@@ -216,61 +109,41 @@ def train_one_epoch(
     device,
     edge_loss_config
 ):
+    """Train one epoch using causal temporal sampling."""
     model.train()
     total_loss = 0
     total_examples = 0
+    loss_breakdown = {'exist': 0, 'prob': 0}
+    
+    # Calculate total batches for unified progress bar
+    total_batches = sum(len(loader) for loader in loaders.values())
+    pbar = tqdm(total=total_batches, desc="Training Epoch", leave=False)
+    num_batches = 0
     
     for etype, loader in loaders.items():
         loss_type = edge_loss_config[etype]
         src_type, _, dst_type = etype
         
-        for batch in tqdm(loader, desc=f"Train {etype[1]}", leave=False):
+        for batch in loader:
             batch = batch.to(device)
             optimizer.zero_grad()
             
-            # Forward pass with Temporal Wrapper
-            # Note: LinkNeighborLoader puts 'time' in batch['time'] if time_attr used?
-            # Actually PyG docs: data.time stores node times.
-            node_time_dict = batch.time_dict if hasattr(batch, 'time_dict') else getattr(batch, 'time', {})
-            edge_time_dict = batch.edge_time_dict if hasattr(batch, 'edge_time_dict') else getattr(batch, 'edge_time', {})
-            
-            # For HeteroData batch, attributes are often on the stores directly?
-            # LinkNeighborLoader returns a HeteroData object.
-            # batch['node_type'].time might exist.
-            
-            # Let's check attributes dynamically
-            actual_node_time_dict = {}
-            for nt in batch.node_types:
-                if hasattr(batch[nt], 'time'):
-                    actual_node_time_dict[nt] = batch[nt].time
-            
-            actual_edge_time_dict = {}
-            for et in batch.edge_types:
-                if hasattr(batch[et], 'edge_time'):
-                    actual_edge_time_dict[et] = batch[et].edge_time
-
+            # Standard forward pass (temporal info used in sampling)
             out = model(
-                x_dict=batch.x_dict,
-                edge_index_dict=batch.edge_index_dict,
-                edge_label_index=batch[etype].edge_label_index,
-                src_type=src_type,
-                dst_type=dst_type,
-                edge_time_dict=actual_edge_time_dict
+                batch.x_dict,
+                batch.edge_index_dict,
+                batch[etype].edge_label_index,
+                src_type,
+                dst_type
             )
             
             targets = batch[etype].edge_label.float()
             
-            # ------------------------------------------------------------------
-            # Dual-Head Logic (Existence + Probability)
-            # ------------------------------------------------------------------
-            loss_exist = torch.tensor(0.0, device=device)
-            loss_prob = torch.tensor(0.0, device=device)
-            
+            # Handle dual-head output
             if isinstance(out, dict):
                 logits_exist = out['logits_exist']
                 logits_prob = out['logits_prob']
                 
-                # Truncate targets if needed
                 num_preds = logits_exist.size(0)
                 targets = targets[:num_preds]
                 
@@ -279,25 +152,18 @@ def train_one_epoch(
                 loss_exist = F.binary_cross_entropy_with_logits(logits_exist, exist_targets)
                 
                 # Head B: Probability (Calibrated Strength)
-                # Only apply for regression tasks (non-BCE)
-                # For BCE (binary) tasks, existence supervision is sufficient.
-                if loss_type != 'bce':
-                    pos_mask = (targets > 0)
-                    if pos_mask.sum() > 0:
-                        prob_logits_pos = logits_prob[pos_mask]
-                        prob_targets_pos = targets[pos_mask]
-                        
-                        # Use appropriate loss for regression
-                        # Although logits_prob is usually passed to BCEWithLogits for [0,1] regression
-                        # If loss_type is huber, we might want huber on SIGMOID(logits)?
-                        # Or consistent with static: BCEWithLogits on soft labels.
-                        loss_prob = F.binary_cross_entropy_with_logits(prob_logits_pos, prob_targets_pos)
-                    else:
-                        loss_prob = torch.tensor(0.0, device=device)
+                pos_mask = (targets > 0)
+                if pos_mask.sum() > 0 and loss_type != 'bce':
+                    prob_logits_pos = logits_prob[pos_mask]
+                    prob_targets_pos = targets[pos_mask]
+                    loss_prob = F.binary_cross_entropy_with_logits(prob_logits_pos, prob_targets_pos)
                 else:
                     loss_prob = torch.tensor(0.0, device=device)
                     
                 loss = loss_exist + loss_prob
+                
+                loss_breakdown['exist'] += loss_exist.item()
+                loss_breakdown['prob'] += loss_prob.item()
                 
             else:
                 # Fallback for single-head models
@@ -305,7 +171,7 @@ def train_one_epoch(
                     loss = F.binary_cross_entropy_with_logits(out[:targets.size(0)], targets)
                 else:
                     loss = F.huber_loss(out[:targets.size(0)], targets.flatten())
-                loss_exist = loss
+                loss_breakdown['exist'] += loss.item()
             
             loss.backward()
             optimizer.step()
@@ -313,30 +179,65 @@ def train_one_epoch(
             batch_size = batch[etype].edge_label_index.size(1)
             total_loss += loss.item() * batch_size
             total_examples += batch_size
+            num_batches += 1
             
-    return total_loss / total_examples if total_examples > 0 else 0.0
+            # Update progress bar
+            pbar.update(1)
+            pbar.set_postfix({'loss': f'{loss.item():.4f}'})
+    
+    pbar.close()
+    
+    # Average loss breakdown
+    if num_batches > 0:
+        loss_breakdown['exist'] /= num_batches
+        loss_breakdown['prob'] /= num_batches
+    
+    return total_loss / total_examples if total_examples > 0 else 0.0, loss_breakdown
 
 
 def main(config_path):
-    print("EVENT-BASED SELF-SUPERVISED PRETRAINING (Time-Aware)")
+    print("\n" + "="*80)
+    print("EVENT-BASED SELF-SUPERVISED PRETRAINING (Causal Temporal Sampling)")
+    print("="*80)
+    
     cfg = OmegaConf.load(config_path)
-    if cfg.wandb.enabled: init_wandb(cfg)
+    if cfg.wandb.enabled: 
+        init_wandb(cfg)
+    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Device: {device}")
     
     # 1. Load Graph
-    temporal_graph = load_event_graph(cfg.data.graph_file, to_undirected=True)
+    print(f"\n📊 Loading graph from {cfg.data.graph_file}")
+    temporal_graph = load_event_graph(
+        cfg.data.graph_file, 
+        to_undirected=True,
+        normalize_features=True
+    )
     
     # 2. Splits
     train_splits, val_splits, test_splits, edge_loss_config = prepare_event_splits(
-        temporal_graph, cfg.pretrain.temporal_split
+        temporal_graph, cfg.data.temporal_split
     )
     
-    # 3. Loaders (Causal)
-    batch_size = cfg.pretrain.get('batch_size', 512)
-    # Using dictionary for num_neighbors robustness
-    default_neighbors = cfg.pretrain.get('num_neighbors', [10, 10])
-    if isinstance(default_neighbors, int): default_neighbors = [default_neighbors]
-    num_neighbors_dict = {et: default_neighbors for et in temporal_graph.edge_types}
+    # 3. Create Data Loaders with Causal Sampling
+    print("\n🚚 Creating Data Loaders (Causal Temporal Sampling)...")
+    batch_size = cfg.pretrain.batch_size
+    num_neighbors = cfg.pretrain.num_neighbors
+    
+    if isinstance(num_neighbors, int):
+        num_neighbors = [num_neighbors]
+    
+    print(f"   Batch size: {batch_size}")
+    print(f"   Num neighbors: {num_neighbors}")
+    print(f"   Negative sampling ratio: {cfg.pretrain.get('neg_sampling_ratio', 1.0)}")
+    print(f"   ⏰ Temporal strategy: 'last' (causal neighbor sampling)")
+    
+    # Robustness: Map num_neighbors for all edge types
+    if not isinstance(num_neighbors, dict):
+        num_neighbors_dict = {et: num_neighbors for et in temporal_graph.edge_types}
+    else:
+        num_neighbors_dict = num_neighbors
     
     train_loaders = {}
     val_loaders = {}
@@ -367,84 +268,202 @@ def main(config_path):
     train_loaders = create_loader(train_splits, shuffle=True)
     val_loaders = create_loader(val_splits, shuffle=False)
     
-    # 4. Model
-    # Determine augmented edge dimension
-    time_dim = 16 # Hyperparameter
+    # 4. Build Model
+    model_name = cfg.model.get('name') or cfg.model.encoder.name
+    hidden_dim = cfg.model.get('hidden_dim') or cfg.model.encoder.hidden_dim
+    num_heads = cfg.model.get('num_heads') or cfg.model.encoder.num_heads
+    num_layers = cfg.model.get('num_layers') or cfg.model.encoder.num_layers
+    dropout = cfg.model.get('dropout') or cfg.model.encoder.dropout
+    use_rte = cfg.model.get('use_rte', False)  # Enable RTE for event-based training
+
+    print(f"\n🏗️  Building {model_name} model...")
+    if use_rte:
+        print(f"   ⏰ Relative Temporal Encoding (RTE): ENABLED")
     
-    # We modify the 'data' metadata passed to build_model to reflect increased edge_dim?
-    # Actually, GATv2Conv usually infers edge_dim if passed? 
-    # Or strict Init? build_model uses config.
-    # The current build_model probably instantiates GATv2 with explicit edge_dim.
-    # We need to hack this locally or update build_model.
-    # For now, let's assume we use HGT (which doesn't use edge_attr usually?) or GATv2.
-    # If GATv2, we must ensure it accepts the concatenated dim.
-    
-    # Simpler: Don't use Time Encoding in first pass if it breaks Architecture.
-    # User said: "one include event graph information"
-    # Using LinkNeighborLoader with 'edge_time' IS using event information for SAMPLING.
-    # Adding Time Encoding is nice-to-have but risky if code breaks.
-    # I'll stick to Standard Model + Causal Sampling first. Use Time Encoding is TGN specific.
-    # If I just use standard model, the "event information" is the CAUSAL STRUCTURE.
-    # I'll instantiate the standard model.
-    
-    model_core = build_model(
-        model_name=cfg.model.name,
+    model = build_model(
+        model_name=model_name,
         data=temporal_graph,
-        hidden_dim=cfg.model.hidden_dim,
-        num_heads=cfg.model.num_heads,
-        num_layers=cfg.model.num_layers,
-        dropout=cfg.model.dropout
+        hidden_dim=hidden_dim,
+        num_heads=num_heads,
+        num_layers=num_layers,
+        dropout=dropout,
+        use_rte=use_rte,
     ).to(device)
     
-    # Wrap if we want to use Time features (Requires model to handle it)
-    # Since I cannot easily change the model's init params without changing `build_model`,
-    # I will SKIP explicit time encoding for now and rely on Causal Sampling.
-    # This still satisfies "Event Graph Information" (the structure is causal).
-    model = model_core 
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=cfg.pretrain.lr,
+        weight_decay=cfg.pretrain.get('weight_decay', 0.0)
+    )
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.pretrain.lr)
+    # Create output directory
+    output_dir = Path(cfg.pretrain.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    # 5. Training Loop
-    # (Simplified version of static loop but with simpler args since no wrapper)
+    # 5. Training Loop with Early Stopping
+    print(f"\n🔄 Starting Training...")
+    print(f"   Epochs: {cfg.pretrain.num_epochs}")
+    print(f"   Learning rate: {cfg.pretrain.lr}")
+    print(f"   Early stopping patience: {cfg.pretrain.early_stopping.patience}")
+    
+    best_val_metric = float('inf')
+    patience_counter = 0
+    patience = cfg.pretrain.early_stopping.patience
     
     for epoch in range(cfg.pretrain.num_epochs):
-        model.train()
-        total_loss = 0
-        total_cnt = 0
+        # Train
+        train_loss, loss_breakdown = train_one_epoch(
+            model, train_loaders,
+            optimizer, device, edge_loss_config
+        )
         
-        for etype, loader in train_loaders.items():
-            loss_type = edge_loss_config[etype]
-            src_type, _, dst_type = etype
-            for batch in tqdm(loader, desc=f"Ep {epoch} {etype[1]}", leave=False):
-                batch = batch.to(device)
-                optimizer.zero_grad()
-                
-                # Standard Forward (Time is used in Sampling!)
-                pred = model(
-                    batch.x_dict,
-                    batch.edge_index_dict,
-                    batch[etype].edge_label_index,
-                    src_type,
-                    dst_type
-                )
-                
-                if loss_type == 'bce':
-                    loss = F.binary_cross_entropy_with_logits(pred[:batch[etype].edge_label.size(0)], batch[etype].edge_label.float())
-                else:
-                    loss = F.huber_loss(pred[:batch[etype].edge_label.size(0)], batch[etype].edge_label.flatten())
-                
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item() * batch[etype].edge_label.size(0)
-                total_cnt += batch[etype].edge_label.size(0)
-                
-        print(f"Epoch {epoch}: Loss {total_loss/total_cnt:.4f}")
+        # Evaluate on validation set
+        model.eval()
+        val_loss = 0
+        val_examples = 0
+        val_breakdown = {'exist': 0, 'prob': 0}
+        val_batches = 0
         
-    # Save, etc... (Omitted for brevity in Plan)
-    torch.save(model.state_dict(), f"{cfg.pretrain.output_dir}/model.pt")
+        total_val_batches = sum(len(loader) for loader in val_loaders.values())
+        val_pbar = tqdm(total=total_val_batches, desc="Validating", leave=False)
+        
+        with torch.no_grad():
+            for etype, loader in val_loaders.items():
+                src_type, rel, dst_type = etype
+                loss_type = edge_loss_config[etype]
+                
+                for batch in loader:
+                    batch = batch.to(device)
+                    
+                    out = model(
+                        batch.x_dict,
+                        batch.edge_index_dict,
+                        batch[etype].edge_label_index,
+                        src_type,
+                        dst_type
+                    )
+                    
+                    targets = batch[etype].edge_label.float()
+                    
+                    # Handle dual-head output
+                    if isinstance(out, dict):
+                        logits_exist = out['logits_exist']
+                        logits_prob = out['logits_prob']
+                        
+                        num_preds = logits_exist.size(0)
+                        targets = targets[:num_preds]
+                        
+                        exist_targets = (targets > 0).float()
+                        loss_exist = F.binary_cross_entropy_with_logits(logits_exist, exist_targets)
+                        
+                        pos_mask = (targets > 0)
+                        if pos_mask.sum() > 0 and loss_type != 'bce':
+                            prob_logits_pos = logits_prob[pos_mask]
+                            prob_targets_pos = targets[pos_mask]
+                            loss_prob = F.binary_cross_entropy_with_logits(prob_logits_pos, prob_targets_pos)
+                        else:
+                            loss_prob = torch.tensor(0.0, device=device)
+                            
+                        loss = loss_exist + loss_prob
+                        val_breakdown['exist'] += loss_exist.item()
+                        val_breakdown['prob'] += loss_prob.item()
+                    else:
+                        loss = F.binary_cross_entropy_with_logits(out[:targets.size(0)], (targets > 0).float())
+                        val_breakdown['exist'] += loss.item()
+                    
+                    val_loss += loss.item() * batch[etype].edge_label_index.size(1)
+                    val_examples += batch[etype].edge_label_index.size(1)
+                    val_batches += 1
+                    
+                    val_pbar.update(1)
+                    val_pbar.set_postfix({'loss': f'{loss.item():.4f}'})
+        
+        val_pbar.close()
+        
+        # Average validation metrics
+        if val_batches > 0:
+            val_breakdown['exist'] /= val_batches
+            val_breakdown['prob'] /= val_batches
+        
+        avg_val_loss = val_loss / val_examples if val_examples > 0 else float('inf')
+        val_metric = avg_val_loss
+        metric_name = 'Loss'
+        
+        # Logging
+        print(f"\nEpoch {epoch+1:03d}/{cfg.pretrain.num_epochs}")
+        print(f"  Train Loss: {train_loss:.4f} (Exist: {loss_breakdown['exist']:.4f}, Prob: {loss_breakdown['prob']:.4f})")
+        print(f"  Val Loss:   {avg_val_loss:.4f} (Exist: {val_breakdown['exist']:.4f}, Prob: {val_breakdown['prob']:.4f})")
+        
+        if cfg.wandb.enabled:
+            wandb.log({
+                "epoch": epoch + 1,
+                "train_loss": train_loss,
+                "train_exist_loss": loss_breakdown['exist'],
+                "train_prob_loss": loss_breakdown['prob'],
+                "val_loss": avg_val_loss,
+                "val_exist_loss": val_breakdown['exist'],
+                "val_prob_loss": val_breakdown['prob']
+            })
+        
+        # Save best model
+        if val_metric < best_val_metric:
+            best_val_metric = val_metric
+            patience_counter = 0
+            torch.save(model.state_dict(), output_dir / "pretrained_best.pt")
+            print(f"  ✓ New best model saved (Val {metric_name}: {val_metric:.4f})")
+        else:
+            patience_counter += 1
+        
+        # Early stopping
+        if patience_counter >= patience:
+            print(f"\n🛑 Early stopping triggered after {epoch+1} epochs")
+            break
+    
+    # 6. Test Evaluation
+    print(f"\n🧪 Starting TEST Evaluation...")
+    
+    # Clean test targets (NaNs)
+    for etype in test_splits:
+        if test_splits[etype].get('edge_attr') is not None:
+            if torch.isnan(test_splits[etype]['edge_attr']).any():
+                test_splits[etype]['edge_attr'] = torch.nan_to_num(test_splits[etype]['edge_attr'], nan=1.0)
+    
+    # Load best model
+    model.load_state_dict(torch.load(output_dir / "pretrained_best.pt"))
+    
+    # Convert test_splits to format expected by evaluate_link_prediction
+    test_edges = {}
+    for etype, data_dict in test_splits.items():
+        test_edges[etype] = {
+            'edge_index': data_dict['edge_index'],
+            'edge_attr': data_dict['edge_attr']
+        }
+    
+    test_metrics = evaluate_link_prediction(
+        model, temporal_graph, test_edges,
+        edge_loss_config, device,
+        num_neg_per_pos=1
+    )
+    
+    print_metrics(test_metrics, prefix="Test")
+    
+    if cfg.wandb.enabled:
+        wandb.log({f"test_{k}": v for k, v in test_metrics.items()})
+        wandb.finish()
+    
+    print(f"\n✅ Pretraining Complete!")
+    print(f"   Best Val {metric_name}: {best_val_metric:.4f}")
+    print(f"   Model saved to: {output_dir / 'pretrained_best.pt'}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True)
+    parser = argparse.ArgumentParser(description="Event-based self-supervised pretraining with causal temporal sampling")
+    parser.add_argument("--config", required=True, help="Path to config file")
+    parser.add_argument("opts", nargs=argparse.REMAINDER, help="Additional key=value options")
     args = parser.parse_args()
-    main(args.config)
+    
+    # Load config and merge CLI args
+    cfg = OmegaConf.load(args.config)
+    cli_conf = OmegaConf.from_cli(args.opts)
+    cfg = OmegaConf.merge(cfg, cli_conf)
+    
+    main(cfg)

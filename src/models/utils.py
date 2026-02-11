@@ -37,6 +37,7 @@ def build_model(
     num_heads: int = 4,
     num_layers: int = 2,
     dropout: float = 0.1,
+    use_rte: bool = False,
 ) -> torch.nn.Module:
     """
     Build model from HeteroData.
@@ -49,6 +50,7 @@ def build_model(
         num_heads: Number of attention heads
         num_layers: Number of layers
         dropout: Dropout rate
+        use_rte: Enable Relative Temporal Encoding (HGT only)
         
     Returns:
         differentiable PyTorch model
@@ -79,6 +81,7 @@ def build_model(
             node_types=node_types,
             metadata=metadata,
             dropout=dropout,
+            use_rte=use_rte,
         )
     elif model_name == 'gatv2':
         model = GATv2(

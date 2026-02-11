@@ -9,8 +9,7 @@ with relation::datasource level edges and scores.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# from torch_geometric.nn import HGTConv, Linear # Replaced by custom
-from .hgt_conv_rte import HGTConvRTE as HGTConv
+from .hgt_conv_rte import HGTConv
 from torch_geometric.nn import Linear
 from typing import Dict, List, Tuple, Optional
 from .decoder import DualHeadDecoder
@@ -33,6 +32,7 @@ class HGT(nn.Module):
         node_types: List[str],
         metadata: Tuple[List[str], List[Tuple[str, str, str]]],
         dropout: float = 0.1,
+        use_rte: bool = False,
     ):
         """
         Initialize HGT encoder.
@@ -46,6 +46,7 @@ class HGT(nn.Module):
             node_types: List of node type names
             metadata: (node_types, edge_types) tuple
             dropout: Dropout rate
+            use_rte: Enable Relative Temporal Encoding
         """
         super().__init__()
         
@@ -53,6 +54,7 @@ class HGT(nn.Module):
         self.out_dim = out_dim
         self.num_layers = num_layers
         self.node_types = node_types
+        self.use_rte = use_rte
         
         # Input projection layer
         self.lin_dict = nn.ModuleDict()
@@ -63,10 +65,11 @@ class HGT(nn.Module):
         self.convs = nn.ModuleList()
         for _ in range(num_layers):
             conv = HGTConv(
-                in_channels=hidden_dim, # Inputs are now projected to hidden_dim
+                in_channels=hidden_dim,
                 out_channels=hidden_dim,
                 metadata=metadata,
                 heads=num_heads,
+                use_RTE=use_rte,
             )
             self.convs.append(conv)
         
@@ -109,8 +112,8 @@ class HGT(nn.Module):
 
         # Apply HGT layers
         for i, conv in enumerate(self.convs):
-            # HGT convolution
-            x_dict = conv(x_dict, edge_index_dict, edge_time_dict=edge_time_dict)
+            # HGT convolution with optional temporal encoding
+            x_dict = conv(x_dict, edge_index_dict, edge_time_diff_dict=edge_time_dict)
             
             # Layer norm + dropout
             x_dict = {
@@ -142,6 +145,7 @@ class HGTLinkPredictor(nn.Module):
         node_types: List[str],
         metadata: Tuple[List[str], List[Tuple[str, str, str]]],
         dropout: float = 0.1,
+        use_rte: bool = False,
     ):
         """
         Initialize link predictor.
@@ -150,6 +154,7 @@ class HGTLinkPredictor(nn.Module):
             in_channels: Input feature dimensions
             hidden_dim: Hidden dimension
             out_dim: Output dimension
+            use_rte: Enable Relative Temporal Encoding
             ...
         """
         super().__init__()
@@ -163,9 +168,11 @@ class HGTLinkPredictor(nn.Module):
             node_types=node_types,
             metadata=metadata,
             dropout=dropout,
+            use_rte=use_rte,
         )
         
-        self.decoder = DualHeadDecoder(out_dim)
+        # Decoder input dim must match encoder output (hidden_dim)
+        self.decoder = DualHeadDecoder(hidden_dim)
     
     def encode(
         self,

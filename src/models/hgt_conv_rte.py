@@ -1,4 +1,5 @@
 import math
+import warnings
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
@@ -7,6 +8,7 @@ from torch.nn import Parameter
 
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.dense import HeteroDictLinear, HeteroLinear
+from torch_geometric.nn.encoding import PositionalEncoding
 from torch_geometric.nn.inits import ones
 from torch_geometric.nn.parameter_dict import ParameterDict
 from torch_geometric.typing import Adj, EdgeType, Metadata, NodeType
@@ -14,9 +16,34 @@ from torch_geometric.utils import softmax
 from torch_geometric.utils.hetero import construct_bipartite_edge_index
 
 
-class HGTConvRTE(MessagePassing):
-    r"""The Heterogeneous Graph Transformer (HGT) operator with Relative Temporal Encoding (RTE).
-    Based on standard HGTConv.
+class HGTConv(MessagePassing):
+    r"""The Heterogeneous Graph Transformer (HGT) operator from the
+    `"Heterogeneous Graph Transformer" <https://arxiv.org/abs/2003.01332>`_
+    paper.
+
+    .. note::
+
+        For an example of using HGT, see `examples/hetero/hgt_dblp.py
+        <https://github.com/pyg-team/pytorch_geometric/blob/master/examples/
+        hetero/hgt_dblp.py>`_.
+
+    Args:
+        in_channels (int or Dict[str, int]): Size of each input sample of every
+            node type, or :obj:`-1` to derive the size from the first input(s)
+            to the forward method.
+        out_channels (int): Size of each output sample.
+        metadata (Tuple[List[str], List[Tuple[str, str, str]]]): The metadata
+            of the heterogeneous graph, *i.e.* its node and edge types given
+            by a list of strings and a list of string triplets, respectively.
+            See :meth:`torch_geometric.data.HeteroData.metadata` for more
+            information.
+        heads (int, optional): Number of multi-head-attentions.
+            (default: :obj:`1`)
+        use_RTE (bool, optional): If set to :obj:`True`, the layer uses
+            Relative Temporal Encoding (RTE).
+            (default: :obj:`False`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch_geometric.nn.conv.MessagePassing`.
     """
     def __init__(
         self,
@@ -24,6 +51,7 @@ class HGTConvRTE(MessagePassing):
         out_channels: int,
         metadata: Metadata,
         heads: int = 1,
+        use_RTE: bool = False,
         **kwargs,
     ):
         super().__init__(aggr='add', node_dim=0, **kwargs)
@@ -38,6 +66,7 @@ class HGTConvRTE(MessagePassing):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.heads = heads
+        self.use_RTE = use_RTE
         self.node_types = metadata[0]
         self.edge_types = metadata[1]
         self.edge_types_map = {
@@ -70,10 +99,9 @@ class HGTConvRTE(MessagePassing):
         for edge_type in self.edge_types:
             edge_type = '__'.join(edge_type)
             self.p_rel[edge_type] = Parameter(torch.empty(1, heads))
-            
-        # RTE: Temporal Linear Projection
-        # We project the sine encoding (dim=dim) to dim to match k/v
-        self.rte_lin = torch.nn.Linear(dim, dim) # Projects time encoding to K/V space
+
+        if self.use_RTE:
+            self.rte = PositionalEncoding(self.out_channels)
 
         self.reset_parameters()
 
@@ -83,7 +111,6 @@ class HGTConvRTE(MessagePassing):
         self.out_lin.reset_parameters()
         self.k_rel.reset_parameters()
         self.v_rel.reset_parameters()
-        self.rte_lin.reset_parameters()
         ones(self.skip)
         ones(self.p_rel)
 
@@ -98,23 +125,9 @@ class HGTConvRTE(MessagePassing):
             cumsum += x.size(0)
         return torch.cat(outs, dim=0), offset
 
-    def _sine_encoding(self, t: Tensor, dim: int) -> Tensor:
-        # t: [N]
-        # returns [N, dim]
-        device = t.device
-        half_dim = dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, dtype=torch.float, device=device) * -emb)
-        emb = t.unsqueeze(1).float() * emb.unsqueeze(0)
-        emb = torch.cat((torch.sin(emb), torch.cos(emb)), dim=1)
-        if dim % 2 == 1:
-             emb = torch.nn.functional.pad(emb, (0, 1))
-        return emb
-
     def _construct_src_node_feat(
         self, k_dict: Dict[str, Tensor], v_dict: Dict[str, Tensor],
-        edge_index_dict: Dict[EdgeType, Adj],
-        edge_time_dict: Optional[Dict[EdgeType, Tensor]]
+        edge_index_dict: Dict[EdgeType, Adj]
     ) -> Tuple[Tensor, Tensor, Dict[EdgeType, int]]:
         """Constructs the source node representations."""
         cumsum = 0
@@ -125,8 +138,6 @@ class HGTConvRTE(MessagePassing):
         ks: List[Tensor] = []
         vs: List[Tensor] = []
         type_list: List[Tensor] = []
-        time_emb_list: List[Tensor] = []
-        
         offset: Dict[EdgeType] = {}
         for edge_type in edge_index_dict.keys():
             src = edge_type[0]
@@ -142,58 +153,6 @@ class HGTConvRTE(MessagePassing):
             type_list.append(type_vec)
             ks.append(k_dict[src])
             vs.append(v_dict[src])
-            
-            # RTE: Construct time encoding
-            # If edge_time exists for this edge type
-            if edge_time_dict and edge_type in edge_time_dict:
-                # edge_time is [num_edges]
-                # But k_dict[src] is [N_src]?
-                # WAIT. HGT logic:
-                # k_dict[src] is ALL nodes of input src type.
-                # In standard HGT, we process ALL source nodes?
-                # No, standard HGT iterates keys of edge_index_dict.
-                # BUT `k_dict[src]` size depends on `x_dict`.
-                # If we have multiple edge types with same src type, we reuse k_dict[src].
-                
-                # CRITICAL: HGT assumes we process all nodes of type S.
-                # But edge_time is an EDGE attribute.
-                # Constructing src_node_feat usually applies REL_EMB to NODE features.
-                # It does NOT use edge-specific info until `propagate`?
-                # `self.k_rel(ks, type_vec)`: `ks` are node features. `type_vec` aligns with the *edges*?
-                # `_construct_src_node_feat` iterates over `edge_index_dict.keys()`?
-                # Wait. `edge_index_dict` keys determine which relations we process.
-                # `k_dict[src]` contains features for ALL source nodes involved?
-                # No, `x_dict` contains all nodes.
-                # The loop `for edge_type in edge_index_dict.keys()`:
-                # Appends `k_dict[src]` to `ks`.
-                # This seems to replicate Source Nodes for EACH relation they are involved in.
-                
-                # If we have edge-specific time, that time is on the EDGE (source -> target).
-                # But `_construct_src_node_feat` prepares "Source Node Representations".
-                # It does not yet know target nodes or specific edges (edge_index).
-                # It prepares `k` and `v` matrices for message passing.
-                # `k` size will be ` sum(N_src_nodes * Heads)`.
-                # Wait, `N = k_dict[src].size(0)`. This IS the number of source nodes.
-                # If we have edge timestamps, each edge has a time.
-                # We can't assign a single time to a source node unless we aggregate?
-                # OR, are we doing "Message Passing with Edge Attributes"?
-                # If `edge_time` is an edge attribute, we should handle it in `message()`.
-                
-                # The PyG HGT implementation:
-                # `k = self.k_rel(...)` -> `k` is (TotalSrcNodes * Heads, D).
-                # `out = self.propagate(..., k=k)`
-                # `propagate` takes `edge_index`.
-                # In `message(k_j, ...)`: `k_j` is picked based on edge_index.
-                
-                # SO: If we want RTE dependent on EDGE time.
-                # We must inject it in `message()`.
-                # We cannot inject it in `_construct_src_node_feat` effectively unless we have node-level time.
-                # User provided `edge_time`.
-                # So we must pass `edge_time` to `propagate` and use it in `message`.
-                
-                pass 
-            
-            # (Continue structure matching)
 
         ks = torch.cat(ks, dim=0).transpose(0, 1).reshape(-1, D)
         vs = torch.cat(vs, dim=0).transpose(0, 1).reshape(-1, D)
@@ -204,20 +163,66 @@ class HGTConvRTE(MessagePassing):
 
         return k, v, offset
 
+    def _validate_inputs(
+        self,
+        edge_index_dict: Dict[EdgeType, Adj],
+        edge_time_diff_dict: Optional[Dict[EdgeType, Tensor]],
+    ) -> None:
+        """Helper function to validate inputs for temporal encoding."""
+        if not self.use_RTE and edge_time_diff_dict is not None:
+            warnings.warn(
+                "'use_RTE' is False, but 'edge_time_diff_dict' was provided. "
+                "The temporal data will be ignored.", stacklevel=2)
+            return
+
+        if self.use_RTE:
+            if edge_time_diff_dict is None:
+                raise ValueError(
+                    "RTE enabled, but no 'edge_time_diff_dict' was provided.")
+
+            for edge_type in edge_index_dict.keys():
+                if edge_type not in edge_time_diff_dict:
+                    raise ValueError(
+                        "RTE enabled, but 'time_diff' missing for edge type: "
+                        f"{edge_type}. "
+                        "All edge types must have a time_diff attribute.")
+
     def forward(
         self,
         x_dict: Dict[NodeType, Tensor],
         edge_index_dict: Dict[EdgeType, Adj],  # Support both.
-        edge_time_dict: Optional[Dict[EdgeType, Tensor]] = None
+        edge_time_diff_dict: Optional[Dict[EdgeType, Tensor]] = None,
     ) -> Dict[NodeType, Optional[Tensor]]:
-        
+        r"""Runs the forward pass of the module.
+
+        Args:
+            x_dict (Dict[str, torch.Tensor]): A dictionary holding input node
+                features  for each individual node type.
+            edge_index_dict (Dict[Tuple[str, str, str], torch.Tensor]): A
+                dictionary holding graph connectivity information for each
+                individual edge type, either as a :class:`torch.Tensor` of
+                shape :obj:`[2, num_edges]` or a
+                :class:`torch_sparse.SparseTensor`.
+            edge_time_diff_dict (Dict[EdgeType, torch.Tensor], optional):
+                A dictionary holding time differences (∆T) for each
+                individual edge type. Each entry must be a 1D
+                :class:`torch.Tensor` of shape :obj:`[num_edges]`. It must be
+                provided if :obj:`use_RTE=True`. (default: :obj:`None`)
+
+        :rtype: :obj:`Dict[str, Optional[torch.Tensor]]` - The output node
+            embeddings for each node type.
+            In case a node type does not receive any message, its output will
+            be set to :obj:`None`.
+        """
+        self._validate_inputs(edge_index_dict, edge_time_diff_dict)
+
         F = self.out_channels
         H = self.heads
         D = F // H
 
         k_dict, q_dict, v_dict, out_dict = {}, {}, {}, {}
 
-        # Compute K, Q, V
+        # Compute K, Q, V over node types:
         kqv_dict = self.kqv_lin(x_dict)
         for key, val in kqv_dict.items():
             k, q, v = torch.tensor_split(val, 3, dim=1)
@@ -226,45 +231,23 @@ class HGTConvRTE(MessagePassing):
             v_dict[key] = v.view(-1, H, D)
 
         q, dst_offset = self._cat(q_dict)
-        
-        # We pass None for edge_time_dict here because we handle it in propagate
         k, v, src_offset = self._construct_src_node_feat(
-            k_dict, v_dict, edge_index_dict, None)
+            k_dict, v_dict, edge_index_dict)
 
         edge_index, edge_attr = construct_bipartite_edge_index(
             edge_index_dict, src_offset, dst_offset, edge_attr_dict=self.p_rel,
             num_nodes=k.size(0))
-            
-        # construct_bipartite_edge_index merges edge_indices from different types.
-        # It also merges 'edge_attr_dict' (p_rel) into 'edge_attr'.
-        # We need to also merge 'edge_time_dict' into a single 'edge_times' tensor
-        # aligned with 'edge_index'.
-        
-        edge_times = None
-        if edge_time_dict:
-            # We must replicate the logic of construct_bipartite_edge_index for edge_times
-            # or manual concat.
-            # construct_bipartite_edge_index iterates dict and concats. It respects order.
-            # We can use the same utility if we handle it carefully, 
-            # OR just manually concat since we know the order matches?
-            # PyG's construct_bipartite_edge_index sorts keys?
-            # "The usage of `construct_bipartite_edge_index` guarantees that edges are sorted..."
-            # It iterates `edge_index_dict` keys.
-            # We should iterate `edge_index_dict` keys and gather `edge_time`.
-            
-            e_times_list = []
-            for edge_type in edge_index_dict.keys(): # Assumes insertion order preservation (Python 3.7+)
-                if edge_type in edge_time_dict and edge_time_dict[edge_type] is not None:
-                    e_times_list.append(edge_time_dict[edge_type])
-                else:
-                    # Provide dummy zeros if missing? or strict?
-                    num_edges = edge_index_dict[edge_type].size(1)
-                    e_times_list.append(torch.zeros(num_edges, device=k.device)) # TODO: Better default?
-            
-            if e_times_list:
-                edge_times = torch.cat(e_times_list, dim=0)
 
-        out = self.propagate(edge_index, k=k, q=q, v=v, edge_attr=edge_attr, edge_times=edge_times)
+        temporal_features = None
+        if self.use_RTE:
+            _, edge_time_diff = construct_bipartite_edge_index(
+                edge_index_dict, src_offset, dst_offset,
+                edge_attr_dict=edge_time_diff_dict, num_nodes=k.size(0))
+
+            temporal_features = self.rte(edge_time_diff).view(-1, H, D)
+
+        out = self.propagate(edge_index, k=k, q=q, v=v, edge_attr=edge_attr,
+                             temporal_features=temporal_features)
 
         # Reconstruct output node embeddings dict:
         for node_type, start_offset in dst_offset.items():
@@ -290,38 +273,13 @@ class HGTConvRTE(MessagePassing):
 
         return out_dict
 
-    def message(self, k_j: Tensor, q_i: Tensor, v_j: Tensor, edge_attr: Tensor, 
-                edge_times: Optional[Tensor],
+    def message(self, k_j: Tensor, q_i: Tensor, v_j: Tensor, edge_attr: Tensor,
                 index: Tensor, ptr: Optional[Tensor],
+                temporal_features: Optional[Tensor],
                 size_i: Optional[int]) -> Tensor:
-        
-        # RTE: Add time encoding to k_j and v_j
-        if edge_times is not None:
-            # edge_times: [num_edges]
-            # Encode
-            D = q_i.size(-1)
-            t_emb = self._sine_encoding(edge_times, D) # [num_edges, D]
-            
-            # Project time embedding to join the HGT latent space
-            # Using self.rte_lin (D -> D)
-            t_emb = self.rte_lin(t_emb) # [num_edges, D]
-            
-            # Add to Key and Value
-            # Structure: k_j is [num_edges, Heads, D/Heads]?
-            # Wait. k_j comes from k which is [N, H, D].
-            # In message(), k_j is lifted to [num_edges, H, D].
-            # q_i is [num_edges, H, D].
-            # edge_attr is [num_edges, H, 1] usually? Or [num_edges, H]?
-            # HGT: edge_attr comes from p_rel parameter which is [1, H].
-            # construct_bipartite repeats it for edges.
-            
-            # We match dimensions.
-            # t_emb is [num_edges, D_total]. Reshape to [num_edges, H, D_head].
-            t_emb = t_emb.view(-1, self.heads, D)
-            
-            k_j = k_j + t_emb
-            v_j = v_j + t_emb
-
+        if temporal_features is not None:
+            k_j = k_j + temporal_features
+            v_j = v_j + temporal_features
         alpha = (q_i * k_j).sum(dim=-1) * edge_attr
         alpha = alpha / math.sqrt(q_i.size(-1))
         alpha = softmax(alpha, index, ptr, size_i)

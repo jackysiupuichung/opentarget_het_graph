@@ -1,5 +1,5 @@
 experiment:
-  name: event_hgt
+  name: event_hgt_pretrain
 
 wandb:
   enabled: false
@@ -7,55 +7,55 @@ wandb:
   entity: null
 
 data:
-  # Temporal event graph
   graph_file: output/graph/hetero_graph_with_features.pt
   mappings_file: output/graph/hetero_mappings.pt
   
-  # Temporal split configuration
+  # Unified temporal split for both pretraining and finetuning
   temporal_split:
-    train: [2000, 2016]
-    val: [2017, 2017]
-    test: [2018, 2025]
-    
-  graph:
-    mode: "event"
-    # Supervision task (link prediction target)
-    supervision:
-      src_type: "disease"
-      relation: "clinical_trial::chembl"
-      dst_type: "target"
+    train: [null, 2016]
+    val: [2017, 2020]
+    test: [2021, 2024]
 
 model:
   name: hgt
-  # Node features
-  node_features:
-    init_method: "random"
-    embedding_dim: 128
-  
-  # HGT architecture
-  hgt:
-    hidden_dim: 128
-    num_heads: 4
-    num_layers: 2
-    dropout: 0.1
+  hidden_dim: 32
+  num_heads: 4
+  num_layers: 2
+  dropout: 0.1
+  use_rte: true  # Enable Relative Temporal Encoding for event-based training
 
-train:
+# Self-supervised pretraining configuration
+pretrain:
+  output_dir: runs/event_hgt_pretrain
   batch_size: 512
-  num_epochs: 10
+  num_neighbors: [10, 10]
+  neg_sampling_ratio: 1.0
+  num_epochs: 100
   lr: 0.001
   weight_decay: 0.0
-  seed: 42
   
-  # Early stopping
   early_stopping:
-    enabled: true
     patience: 10
-    monitor: "val_loss"
 
-eval:
-  k_values: [200, 500]
+# Clinical task finetuning configuration
+finetune:
+  output_dir: runs/event_hgt_finetune
+  pretrained_checkpoint: runs/event_hgt_pretrain/pretrained_best.pt
+  batch_size: 512
+  num_neighbors: [10, 10]
+  num_epochs: 50
+  lr: 0.0001
+  weight_decay: 0.0001
   
-  # Cold start evaluation
-  cold_start:
-    enabled: false
-    min_interactions: 5
+  early_stopping:
+    patience: 5
+  
+  # Clinical trial prediction tasks
+  tasks:
+    - name: phase_transition
+      type: regression
+      weight: 1.0
+    - name: trial_success
+      type: classification
+      weight: 1.0
+
