@@ -149,7 +149,14 @@ def train_one_epoch(
                 edge_time_dict=edge_time_dict
             )
             
-            targets = batch[etype].edge_label.float()
+            # Get edge labels (LinkNeighborLoader stores them at batch level)
+            if hasattr(batch, 'edge_label'):
+                targets = batch.edge_label.float()
+            elif hasattr(batch[etype], 'edge_label'):
+                targets = batch[etype].edge_label.float()
+            else:
+                # Fallback: use edge_attr as labels (for backward compatibility)
+                targets = batch[etype].edge_attr.float() if hasattr(batch[etype], 'edge_attr') else torch.ones(batch[etype].edge_label_index.size(1), device=device)
             
             # Handle dual-head output
             if isinstance(out, dict):
