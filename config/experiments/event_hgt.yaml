@@ -30,32 +30,31 @@ pretrain:
   batch_size: 512
   num_neighbors: [10, 10]
   neg_sampling_ratio: 1.0
-  num_epochs: 100
+  num_epochs: 1
   lr: 0.001
   weight_decay: 0.0
   
   early_stopping:
     patience: 10
 
-# Clinical task finetuning configuration
 finetune:
   output_dir: runs/event_hgt_finetune
-  pretrained_checkpoint: runs/event_hgt_pretrain/pretrained_best.pt
+  num_epochs: 2
   batch_size: 512
-  num_neighbors: [10, 10]
-  num_epochs: 50
-  lr: 0.0001
+  lr: 0.001
   weight_decay: 0.0001
-  
+  negative_ratio: 15
   early_stopping:
-    patience: 5
+    enabled: true
+    patience: 10
+  save_predictions: false
   
-  # Clinical trial prediction tasks
-  tasks:
-    - name: phase_transition
-      type: regression
-      weight: 1.0
-    - name: trial_success
-      type: classification
-      weight: 1.0
+  # Finetune-Specific Model Params
+  model:
+    freeze_encoder: true
+    pretrained_checkpoint: runs/event_hgt_pretrain/pretrained_best.pt
+    decoder:
+      hidden_dim: 32
+      dropout: 0.1
+
 

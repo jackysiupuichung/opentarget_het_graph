@@ -195,12 +195,10 @@ def train_one_epoch(
     return total_loss / total_examples if total_examples > 0 else 0.0, loss_breakdown
 
 
-def main(config_path):
+def main(cfg):
     print("\n" + "="*80)
     print("EVENT-BASED SELF-SUPERVISED PRETRAINING (Causal Temporal Sampling)")
     print("="*80)
-    
-    cfg = OmegaConf.load(config_path)
     if cfg.wandb.enabled: 
         init_wandb(cfg)
     
