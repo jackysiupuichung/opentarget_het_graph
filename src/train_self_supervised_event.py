@@ -163,8 +163,8 @@ def train_one_epoch(
                 logits_exist = out['logits_exist']
                 logits_prob = out['logits_prob']
                 
-                num_preds = logits_exist.size(0)
-                targets = targets[:num_preds]
+                # Flatten targets to match logits shape
+                targets = targets.flatten()
                 
                 # Head A: Existence (Binary Discovery)
                 exist_targets = (targets > 0).float()
