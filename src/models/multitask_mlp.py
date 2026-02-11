@@ -30,8 +30,9 @@ class MultiTaskClinicalMLP(nn.Module):
         )
         
         # Multi-task head: 4 outputs
-        # We output LOGITS. Sigmoid is applied in loss (BCEWithLogits) or during inference.
+        # GATher uses ReLU activation for regression tasks (continuous phase values)
         self.head = nn.Linear(hidden_dim // 2, 4)
+        self.output_activation = nn.ReLU()  # Non-negative continuous predictions
         
     def forward(self, disease_emb, target_emb):
         """
@@ -48,24 +49,28 @@ class MultiTaskClinicalMLP(nn.Module):
         # Shared encoder
         feat = self.net(x)
         
-        # Multi-task prediction (logits)
-        logits = self.head(feat)
+        # Multi-task prediction (continuous phase values)
+        # Apply ReLU for regression (GATher approach)
+        outputs = self.head(feat)
+        outputs = self.output_activation(outputs)  # Non-negative predictions
         
         return {
-            'pos': logits[:, 0],
-            'unmet': logits[:, 1],
-            'adv': logits[:, 2],
-            'op': logits[:, 3]
+            'pos': outputs[:, 0],
+            'unmet': outputs[:, 1],
+            'adv': outputs[:, 2],
+            'op': outputs[:, 3]
         }
 
 class WeightedMultiTaskLoss(nn.Module):
     """
-    Weighted Multi-Task Loss (BCEWithLogits or Huber).
+    Weighted Multi-Task Loss for Regression (MSE or Huber).
+    
+    GATher uses regression losses for continuous phase prediction.
     """
-    def __init__(self, weights=None, use_huber=False):
+    def __init__(self, weights=None, use_huber=True):
         super().__init__()
         self.weights = weights if weights else {'pos': 1.0, 'unmet': 1.0, 'adv': 1.0, 'op': 1.0}
-        self.use_huber = use_huber
+        self.use_huber = use_huber  # Default to Huber (more robust)
         
     def forward(self, predictions, targets):
         """
@@ -83,13 +88,15 @@ class WeightedMultiTaskLoss(nn.Module):
             pred = predictions[task]
             target = targets[task]
             
+            # Regression losses (GATher approach)
+            # Predictions are already ReLU-activated (non-negative)
+            # Targets are continuous phase values (0.0 to 4.0 or normalized)
             if self.use_huber:
-                # For Huber, we need probabilities (sigmoid applied)
-                # target should be 0.0 or 1.0
-                loss = F.huber_loss(torch.sigmoid(pred), target)
+                # Huber loss (robust to outliers)
+                loss = F.huber_loss(pred, target, delta=1.0)
             else:
-                # Standard BCE (expects logits)
-                loss = F.binary_cross_entropy_with_logits(pred, target)
+                # Mean Squared Error
+                loss = F.mse_loss(pred, target)
                 
             w_loss = loss * self.weights.get(task, 1.0)
             total_loss += w_loss
