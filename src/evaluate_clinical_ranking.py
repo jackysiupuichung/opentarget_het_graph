@@ -18,14 +18,7 @@ from tqdm import tqdm
 from omegaconf import OmegaConf
 
 from torch_geometric.data import HeteroData
-# Handle potential module import issues if run from different cwd
-try:
-    from src.models.multitask_mlp import MultiTaskClinicalMLP
-except ImportError:
-    # Try local import if src is not in path
-    sys.path.append(".")
-    from src.models.multitask_mlp import MultiTaskClinicalMLP
-
+from src.models.multitask_mlp import MultiTaskClinicalMLP
 from src.models.utils import build_model
 
 
@@ -82,16 +75,12 @@ def extract_labels_from_graph(graph, split_year, node_mappings):
                 label_data[key] = {t: 0.0 for t in task_edge_map.keys()}
             label_data[key][task] = max(label_data[key][task], score)
 
-    # Return as set of (d_idx, t_idx) tuples for easy filtering/lookup
-    # We only care about existence for history filtering
-    pairs = set(label_data.keys())
+    # Compute max score across all outcomes for each pair (ground truth)
+    max_scores = {}
+    for key, task_scores in label_data.items():
+        max_scores[key] = max(task_scores.values())
     
-    # For ground truth (test), we specifically want pairs where 'op' > 0 (or some threshold)
-    # The user request implies ranking based on predicted 'op'.
-    # Ground truth is typically "did it actually succeed?" (op > 0)
-    # Or "did it exist in test set?" 
-    # Let's return the full data dict so we can filter later.
-    return label_data
+    return label_data, max_scores
 
 
 def evaluate_ranking(
@@ -106,68 +95,78 @@ def evaluate_ranking(
 ):
     """
     Evaluate ranking metrics per disease.
+    
+    For each disease, creates a candidate set of novel targets (excluding train+val history),
+    scores only those candidates, and computes ranking metrics.
     """
     model.eval()
     
     # Pre-compute metrics storage
-    # Adding Precision and Recall
     metrics = {k: {'precision': [], 'recall': [], 'hits': [], 'mrr': [], 'ndcg': []} for k in k_values}
     
     # Identify test diseases (diseases that have at least one test pair)
     test_diseases = set(d for d, t in test_pairs.keys())
     
-    print(f"\\n🔍 Evaluating Ranking on {len(test_diseases)} diseases...")
+    print(f"\n🔍 Evaluating Ranking on {len(test_diseases)} diseases...")
     print(f"   K values: {k_values}")
     
     # Pre-organize ground truth: disease -> set(target_indices)
+    # test_pairs now contains max_scores (float values)
     test_ground_truth = {}
-    for (d, t), scores in test_pairs.items():
-        if d not in test_ground_truth: test_ground_truth[d] = set()
-        test_ground_truth[d].add(t)
+    for (d, t), max_score in test_pairs.items():
+        if max_score > 0:  # Only consider pairs with actual clinical trial activity
+            if d not in test_ground_truth: test_ground_truth[d] = set()
+            test_ground_truth[d].add(t)
         
     # Pre-organize history: disease -> set(target_indices)
     history_map = {}
     for (d, t) in train_pairs.keys():
         if d not in history_map: history_map[d] = set()
         history_map[d].add(t)
-        
-    # All target indices (candidates)
-    all_targets = torch.arange(num_target_nodes, device=device)
+    
+    # All target embeddings
     target_emb_all = embeddings['target'].to(device) # [N_t, dim]
+    all_target_indices = set(range(num_target_nodes))
     
     # Loop over diseases
     for d_idx in tqdm(test_diseases):
         true_targets = test_ground_truth[d_idx]
         history = history_map.get(d_idx, set())
         
-        # Prepare inputs
+        # Build candidate set: all targets EXCEPT those in train+val history
+        candidate_targets = all_target_indices - history
+        candidate_list = sorted(list(candidate_targets))
+        
+        if len(candidate_list) == 0:
+            continue  # Skip if no candidates (shouldn't happen)
+        
+        # Prepare inputs for candidates only
         d_emb = embeddings['disease'][d_idx].unsqueeze(0).to(device) # [1, dim]
+        candidate_indices = torch.tensor(candidate_list, device=device, dtype=torch.long)
+        candidate_embs = target_emb_all[candidate_indices]  # [num_candidates, dim]
         
-        # Expand disease emb to match all targets
-        d_emb_expanded = d_emb.expand(num_target_nodes, -1)
+        # Expand disease embedding to match candidates
+        d_emb_expanded = d_emb.expand(len(candidate_list), -1)
         
-        # Forward pass
+        # Forward pass on candidates only
         with torch.no_grad():
-            logits = model(d_emb_expanded, target_emb_all) # returns dict
-            # Use 'op' score for ranking
-            scores = torch.sigmoid(logits['op']) # [N_t]
-            
-        # Mask history
-        if history:
-            hist_indices = torch.tensor(list(history), device=device, dtype=torch.long)
-            scores[hist_indices] = -1.0 # Set to lowest possible
-            
-        # Ranking
-        max_k = max(k_values)
-        top_k_scores, top_k_indices = torch.topk(scores, max_k)
-        top_k_indices = top_k_indices.cpu().tolist()
+            logits = model(d_emb_expanded, candidate_embs)
+            scores = torch.sigmoid(logits['op'])  # [num_candidates]
+        
+        # Rank candidates
+        max_k = min(max(k_values), len(candidate_list))
+        top_k_scores, top_k_local_indices = torch.topk(scores, max_k)
+        
+        # Map back to global target indices
+        top_k_indices = [candidate_list[i] for i in top_k_local_indices.cpu().tolist()]
         
         # Metrics
         for k in k_values:
-            curr_top = top_k_indices[:k]
+            k_actual = min(k, len(top_k_indices))
+            curr_top = top_k_indices[:k_actual]
             intersects = len(set(curr_top) & true_targets)
             
-            # Recall@K (Sensitivity / Hit Rate)
+            # Recall@K
             if len(true_targets) > 0:
                 recall = intersects / len(true_targets)
             else:
@@ -175,13 +174,13 @@ def evaluate_ranking(
             metrics[k]['recall'].append(recall)
             
             # Precision@K
-            precision = intersects / k
+            precision = intersects / k_actual if k_actual > 0 else 0.0
             metrics[k]['precision'].append(precision)
             
-            # Hits@K (Binary check - did we find at least one?)
+            # Hits@K
             metrics[k]['hits'].append(1.0 if intersects > 0 else 0.0)
             
-            # MRR (Mean Reciprocal Rank)
+            # MRR
             rr = 0.0
             for rank, t_idx in enumerate(curr_top):
                 if t_idx in true_targets:
@@ -199,7 +198,7 @@ def evaluate_ranking(
                     dcg += 1.0 / np.log2(i + 2)
             
             # IDCG (Perfect ranking)
-            num_relevant = min(k, len(true_targets))
+            num_relevant = min(k_actual, len(true_targets))
             for i in range(num_relevant):
                 idcg += 1.0 / np.log2(i + 2)
                 
@@ -228,6 +227,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True, help="Path to experiment config (yaml)")
     parser.add_argument("--checkpoint", help="Path to checkpoint (default: output_dir/best_decoder.pt)")
+    parser.add_argument("--validation_diseases", default="/Users/pui.chungsiu/Documents/opentarget_het_graph/data/validation_diseases.csv", 
+                        help="Path to validation diseases CSV for filtering benchmark diseases")
     args = parser.parse_args()
     
     cfg = OmegaConf.load(args.config)
@@ -244,6 +245,14 @@ def main():
     mappings = torch.load(cfg.data.mappings_file, weights_only=False)
     node_mappings = mappings['node_mapping']
     
+    # Load validation diseases for filtering
+    print(f"📋 Loading validation diseases from {args.validation_diseases}...")
+    val_diseases_df = pd.read_csv(args.validation_diseases)
+    # Filter out diseases not in graph (graph_node_idx == -1)
+    val_diseases_df = val_diseases_df[val_diseases_df['graph_node_idx'] != -1]
+    validation_disease_indices = set(val_diseases_df['graph_node_idx'].tolist())
+    print(f"   Loaded {len(validation_disease_indices)} validation diseases for benchmark")
+    
     # Embeddings
     print(f"🔧 Extracting features...")
     embeddings = {}
@@ -256,18 +265,8 @@ def main():
         else:
              raise ValueError(f"Node type {nt} has no features!")
 
-    # 2. Extract Edges
-    # Define "History" as everything up to end of VALIDATION or TRAIN?
-    # User request: "exclusively test edge as novel disease targets"
-    # To be "novel" in Test, it must NOT be in Train OR Val.
-    # Check config for Val year.
-    
+    # To be "novel" in Test, it must NOT be in Train OR Val.    
     ts = cfg.data.temporal_split
-    
-    # Determine Cutoff Years
-    # Train is strictly training.
-    # Val is usually known history during model selection.
-    # So History should include Val.
     
     if hasattr(ts, 'val') and ts.val is not None:
         history_year = ts.val[1] # End of validation (e.g., 2020)
@@ -279,15 +278,17 @@ def main():
     test_year = ts.test[1]
     
     print(f"\\n📊 Extracting History (All edges <= {history_year})...")
-    history_data = extract_labels_from_graph(graph, history_year, node_mappings)
+    history_data, _ = extract_labels_from_graph(graph, history_year, node_mappings)
     
     print(f"📊 Extracting Test Candidates (Edges <= {test_year})...")
-    full_test_data = extract_labels_from_graph(graph, test_year, node_mappings)
+    full_test_data, full_test_max_scores = extract_labels_from_graph(graph, test_year, node_mappings)
     
     # Novel Test = (Edges <= Test) - (Edges <= History)
+    # Ground truth uses max score across all outcomes
+    # Filter to only validation diseases
     test_novel_data = {
-        k: v for k, v in full_test_data.items() 
-        if k not in history_data
+        k: full_test_max_scores[k] for k in full_test_data.keys() 
+        if k not in history_data and k[0] in validation_disease_indices
     }
     
     print(f"   Total Edges in Test Period Window: {len(full_test_data):,}")
