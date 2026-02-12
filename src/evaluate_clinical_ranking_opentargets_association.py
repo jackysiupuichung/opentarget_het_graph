@@ -309,18 +309,83 @@ def evaluate_ranking_with_scores(
     # Average metrics
     final_results = {}
     print(f"\n📊 Ranking Results (OpenTargets Association Scores):")
+    print(f"\n   MACRO-AVERAGED (average of per-disease metrics):")
     for k in k_values:
         avg_rec = np.mean(metrics[k]['recall'])
         avg_prec = np.mean(metrics[k]['precision'])
         avg_mrr = np.mean(metrics[k]['mrr'])
         avg_ndcg = np.mean(metrics[k]['ndcg'])
         
-        final_results[f'Recall@{k}'] = float(avg_rec)
-        final_results[f'Precision@{k}'] = float(avg_prec)
-        final_results[f'MRR@{k}'] = float(avg_mrr)
-        final_results[f'NDCG@{k}'] = float(avg_ndcg)
+        final_results[f'Macro-Recall@{k}'] = float(avg_rec)
+        final_results[f'Macro-Precision@{k}'] = float(avg_prec)
+        final_results[f'Macro-MRR@{k}'] = float(avg_mrr)
+        final_results[f'Macro-NDCG@{k}'] = float(avg_ndcg)
         
         print(f"   K={k:<3}: Recall={avg_rec:.4f} | Precision={avg_prec:.4f} | MRR={avg_mrr:.4f} | NDCG={avg_ndcg:.4f}")
+    
+    # Compute micro-averaged metrics (aggregate first, then compute)
+    print(f"\n   MICRO-AVERAGED (aggregate across all diseases):")
+    
+    # Re-organize data for micro-averaging
+    test_ground_truth = {}
+    for (d, t), max_score in test_pairs.items():
+        if max_score > 0:
+            if d not in test_ground_truth: test_ground_truth[d] = set()
+            test_ground_truth[d].add(t)
+    
+    history_map = {}
+    for (d, t) in train_pairs.keys():
+        if d not in history_map: history_map[d] = set()
+        history_map[d].add(t)
+    
+    test_diseases = set(d for d, t in test_pairs.keys())
+    all_target_indices = set(range(num_target_nodes))
+    
+    for k in k_values:
+        total_hits = 0
+        total_true_targets = 0
+        total_k = 0
+        
+        for d_idx in test_diseases:
+            true_targets = test_ground_truth.get(d_idx, set())
+            if len(true_targets) == 0:
+                continue
+            
+            history = history_map.get(d_idx, set())
+            candidate_targets = all_target_indices - history
+            candidate_list = sorted(list(candidate_targets))
+            
+            if len(candidate_list) == 0:
+                continue
+            
+            # Get scores
+            candidate_scores = []
+            for t_idx in candidate_list:
+                score = association_scores.get((d_idx, t_idx), 0.0)
+                candidate_scores.append(score)
+            
+            candidate_scores = np.array(candidate_scores)
+            sorted_indices = np.argsort(-candidate_scores)
+            
+            # Get top-k
+            k_actual = min(k, len(candidate_list))
+            top_k_local = sorted_indices[:k_actual]
+            top_k_targets = [candidate_list[i] for i in top_k_local]
+            
+            # Count hits
+            hits = len(set(top_k_targets) & true_targets)
+            total_hits += hits
+            total_true_targets += len(true_targets)
+            total_k += k_actual
+        
+        # Micro-averaged metrics
+        micro_recall = total_hits / total_true_targets if total_true_targets > 0 else 0
+        micro_precision = total_hits / total_k if total_k > 0 else 0
+        
+        final_results[f'Micro-Recall@{k}'] = float(micro_recall)
+        final_results[f'Micro-Precision@{k}'] = float(micro_precision)
+        
+        print(f"   K={k:<3}: Recall={micro_recall:.4f} | Precision={micro_precision:.4f}")
         
     return final_results
 
