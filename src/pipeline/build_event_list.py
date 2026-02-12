@@ -57,6 +57,48 @@ def aggregate_scores(scores, method='harmonic_sum'):
         raise ValueError(f"Unknown aggregation method: {method}. Use 'harmonic_sum' or 'max'")
 
 
+def load_datatype_mapping(config_path):
+    """Load datasource->datatype mapping with weights.
+    
+    Returns:
+        dict: {datasourceId: {'datatype': datatype_id, 'weight': weight}}
+    """
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    mapping = {}
+    
+    for datatype_id, datatype_info in config['datatypes'].items():
+        for datasource_id, weight in datatype_info['datasources'].items():
+            mapping[datasource_id] = {
+                'datatype': datatype_id,
+                'weight': weight,
+                'label': datatype_info['label']
+            }
+    
+    return mapping
+
+
+def add_datatype_info(edges, datatype_mapping):
+    """Add datatypeId and weight columns based on datasourceId."""
+    edges = edges.copy()
+    
+    # Map datasourceId -> datatype and weight
+    edges['datatypeId'] = edges['datasourceId'].map(
+        lambda x: datatype_mapping.get(x, {}).get('datatype', x)
+    )
+    edges['datasource_weight'] = edges['datasourceId'].map(
+        lambda x: datatype_mapping.get(x, {}).get('weight', 1.0)
+    )
+    
+    # Warn about unmapped datasources
+    unmapped = edges[~edges['datasourceId'].isin(datatype_mapping)]['datasourceId'].unique()
+    if len(unmapped) > 0:
+        print(f"⚠️  Unmapped datasources (weight=1.0): {unmapped.tolist()}")
+    
+    return edges
+
+
 def load_all_edges(directory, sample_ratio=None):
     """Load all parquet files from directory.
     
@@ -81,46 +123,7 @@ def load_all_edges(directory, sample_ratio=None):
     return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
 
-def apply_cutoffs(edges, config):
-    """Apply datasource-specific cutoffs using relation::datasource format."""
-    if 'datasources' not in config:
-        return edges
-    
-    # Create composite key: relation::datasourceId
-    edges = edges.copy()
-    edges['relation_datasource'] = edges['relation'] + '::' + edges['datasourceId']
-    
-    filtered = []
-    
-    for relation_datasource, params in config['datasources'].items():
-        ds_edges = edges[edges['relation_datasource'] == relation_datasource].copy()
-        
-        if ds_edges.empty:
-            continue
-        
-        if 'cutoff' in params and 'score' in ds_edges.columns:
-            cutoff = params['cutoff']
-            ds_edges = ds_edges[ds_edges['score'] >= cutoff]
-            print(f"   {relation_datasource}: {len(ds_edges):,} edges (cutoff >= {cutoff})")
-        else:
-            print(f"   {relation_datasource}: {len(ds_edges):,} edges")
-        
-        filtered.append(ds_edges)
-    
-    # Include unconfigured datasources
-    configured = set(config['datasources'].keys())
-    unconfigured = edges[~edges['relation_datasource'].isin(configured)]
-    if not unconfigured.empty:
-        print(f"   Other relation::datasource combinations: {len(unconfigured):,} edges")
-        filtered.append(unconfigured)
-    
-    result = pd.concat(filtered, ignore_index=True) if filtered else pd.DataFrame()
-    
-    # Drop the temporary column
-    if not result.empty and 'relation_datasource' in result.columns:
-        result = result.drop(columns=['relation_datasource'])
-    
-    return result
+
 
 
 def build_event_list(
@@ -129,6 +132,7 @@ def build_event_list(
     output_file: str,
     aggregation_method: str = 'harmonic_sum',
     sample_ratio: float = None,
+    datatype_mapping_file: str = None,
 ):
     """
     Build temporal event graph from raw edges using cumulative aggregation.
@@ -144,8 +148,17 @@ def build_event_list(
     """
     print("\n" + "="*80)
     sample_info = f" [SAMPLE: {sample_ratio*100:.1f}%]" if sample_ratio else ""
-    print(f"BUILDING TEMPORAL EVENT GRAPH (aggregation: {aggregation_method}){sample_info}")
+    mode_str = "DATATYPE-level" if datatype_mapping_file else "datasource-level"
+    print(f"BUILDING TEMPORAL EVENT GRAPH ({mode_str}, aggregation: {aggregation_method}){sample_info}")
     print("="*80)
+    
+    # Load datatype mapping
+    datatype_mapping = None
+    if datatype_mapping_file:
+        print(f"\n📊 Loading datatype mapping from {datatype_mapping_file}...")
+        datatype_mapping = load_datatype_mapping(datatype_mapping_file)
+        print(f"✅ Loaded {len(datatype_mapping)} datasource->datatype mappings")
+        print(f"   Datatypes: {set(d['datatype'] for d in datatype_mapping.values())}")
     
     # Load config
     print(f"\n📄 Loading config from {config_path}...")
@@ -180,18 +193,28 @@ def build_event_list(
     dynamic_edges = edges[edges['year'].notna()].copy()
     print(f"📊 Dynamic edges: {len(dynamic_edges):,}")
     
-    # Apply cutoffs
-    print(f"\n✂️ Applying datasource cutoffs...")
-    dynamic_edges = apply_cutoffs(dynamic_edges, config)
-    print(f"✅ {len(dynamic_edges):,} edges after cutoffs")
+    # Add datatype info if using datatype aggregation
+    if datatype_mapping:
+        print(f"\n🏷️  Adding datatype information...")
+        dynamic_edges = add_datatype_info(dynamic_edges, datatype_mapping)
+        print(f"✅ Added datatypeId and datasource_weight columns")
     
     # Build cumulative temporal events
     print(f"\n🔢 Building cumulative temporal events...")
     print(f"   For each year {start_year}-{end_year}: include all evidences up to that year")
     
     # Group columns (without year)
-    group_cols = ['sourceId', 'targetId', 'source_type', 'target_type', 
-                  'relation', 'datasourceId']
+    if datatype_mapping:
+        # Datatype-level: group by datatypeId
+        group_cols = ['sourceId', 'targetId', 'source_type', 'target_type', 
+                      'relation', 'datatypeId']
+        datasource_group_cols = ['sourceId', 'targetId', 'source_type', 'target_type', 
+                                 'relation', 'datatypeId', 'datasourceId']
+    else:
+        # Datasource-level: group by datasourceId
+        group_cols = ['sourceId', 'targetId', 'source_type', 'target_type', 
+                      'relation', 'datasourceId']
+        datasource_group_cols = group_cols
     
     # Store all year-score combinations
     all_events = []
@@ -211,18 +234,44 @@ def build_event_list(
         
         dfs_to_concat = []
         
-        # 1. Clinical Trials -> MAX
+        # 1. Clinical Trials -> MAX (always at datasource level, no datatype aggregation)
         if not clinical_edges.empty:
-            clinical_agg = clinical_edges.groupby(group_cols, as_index=False)['score'].max()
+            clinical_agg = clinical_edges.groupby(
+                ['sourceId', 'targetId', 'source_type', 'target_type', 'relation', 'datasourceId'],
+                as_index=False
+            )['score'].max()
+            # Add datatypeId if needed
+            if datatype_mapping:
+                clinical_agg['datatypeId'] = clinical_agg['datasourceId']
             dfs_to_concat.append(clinical_agg)
             
-        # 2. Others -> Harmonic Sum (or whatever aggregation_method is set to)
+        # 2. Others -> Process differently based on mode
         if not other_edges.empty:
-            # Vectorized harmonic sum is hard, stick to lambda for now or optimize later
-            other_agg = other_edges.groupby(group_cols, as_index=False).agg({
-                'score': lambda x: aggregate_scores(x.values, method=aggregation_method)
-            })
-            dfs_to_concat.append(other_agg)
+            if datatype_mapping:
+                # DATATYPE MODE:
+                # Step 1: Harmonic sum per datasource (within each datatype group)
+                datasource_scores = other_edges.groupby(datasource_group_cols, as_index=False).agg({
+                    'score': lambda x: aggregate_scores(x.values, method=aggregation_method),
+                    'datasource_weight': 'first'  # Keep weight
+                })
+                
+                # Step 2: Weight datasource scores
+                datasource_scores['weighted_score'] = (
+                    datasource_scores['score'] * datasource_scores['datasource_weight']
+                )
+                
+                # Step 3: Harmonic sum of weighted datasource scores -> datatype score
+                datatype_agg = datasource_scores.groupby(group_cols, as_index=False).agg({
+                    'weighted_score': lambda x: aggregate_scores(x.values, method=aggregation_method)
+                }).rename(columns={'weighted_score': 'score'})
+                
+                dfs_to_concat.append(datatype_agg)
+            else:
+                # DATASOURCE MODE: Simple harmonic sum per datasource
+                other_agg = other_edges.groupby(group_cols, as_index=False).agg({
+                    'score': lambda x: aggregate_scores(x.values, method=aggregation_method)
+                })
+                dfs_to_concat.append(other_agg)
             
         if not dfs_to_concat:
             continue
@@ -329,6 +378,12 @@ def main():
         default=None,
         help="Sample ratio for testing (e.g., 0.01 for 1:100 sample). Default: None (use all data)"
     )
+    parser.add_argument(
+        "--datatype-mapping",
+        type=str,
+        default=None,
+        help="Path to datatype mapping YAML (enables datatype-level aggregation). Default: None (datasource-level)"
+    )
     
     args = parser.parse_args()
     
@@ -337,6 +392,7 @@ def main():
         config_path=args.config,
         aggregation_method=args.aggregation_method,
         sample_ratio=args.sample_ratio,
+        datatype_mapping_file=args.datatype_mapping,
         output_file=args.output,
     )
 
