@@ -107,13 +107,14 @@ def build_anchor_table(
     if not score_col:
         raise ValueError("Edge parquets must have a 'score' or 'edge_weight' column.")
 
-    # Filter to ChEMBL edges
+    # Filter to ChEMBL edges. Prefer `datasourceId` (used in KG pipeline outputs),
+    # then `datasource`. Don't fallback to `sourceId` since that is a node id.
     chembl_mask = (
-        edges['datasource'].str.contains('chembl', case=False, na=False)
+        edges['datasourceId'].astype(str).str.contains('chembl', case=False, na=False)
+        if 'datasourceId' in edges.columns else
+        edges['datasource'].astype(str).str.contains('chembl', case=False, na=False)
         if 'datasource' in edges.columns else
-        edges['sourceId'].isin(['chembl'])
-        if 'sourceId' in edges.columns else
-        pd.Series([True] * len(edges))
+        pd.Series([False] * len(edges))
     )
 
     chembl = edges[chembl_mask & edges[year_col].notna()].copy()
