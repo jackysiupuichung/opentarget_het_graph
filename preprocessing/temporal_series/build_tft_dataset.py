@@ -60,6 +60,26 @@ def load_edges(edges_dir: str, sample_ratio: float = None) -> pd.DataFrame:
 
 
 # ──────────────────────────────────────────────
+# Score → Clinical Phase Thresholds
+# Open Targets ChEMBL score mapping:
+#   Phase 1: score >= 0.1
+#   Phase 2: score >= 0.2  ← anchor (T=0)
+#   Phase 3: score >= 0.7  ← positive outcome
+#   Phase 4: score == 1.0  ← positive outcome
+# ──────────────────────────────────────────────
+PHASE_THRESHOLDS  = {1: 0.1, 2: 0.2, 3: 0.7, 4: 1.0}
+ANCHOR_SCORE_MIN  = PHASE_THRESHOLDS[2]  # 0.2 (Phase 2)
+OUTCOME_SCORE_MIN = PHASE_THRESHOLDS[3]  # 0.7 (Phase 3)
+
+def get_phase(score: float) -> int:
+    """Map score to clinical phase using thresholds."""
+    if score >= 1.0: return 4
+    if score >= 0.7: return 3
+    if score >= 0.2: return 2
+    if score >= 0.1: return 1
+    return 0
+
+# ──────────────────────────────────────────────
 # Anchor Table
 # ──────────────────────────────────────────────
 
@@ -69,47 +89,63 @@ def build_anchor_table(
     val_max: int,
     test_max: int,
     outcome_max: int,
-) -> pd.DataFrame:
+):
     """
     Identify T=0 (first Phase 2 entry) for each TD pair from ChEMBL.
-    Assign partition tags and binary outcome labels.
+    Phase 2 proxy: score >= ANCHOR_SCORE_MIN  (0.2)
+    Phase 3 proxy: score >= OUTCOME_SCORE_MIN (0.7)
 
     Returns:
-        DataFrame with columns: [sourceId, targetId, anchor_year, partition, outcome]
+        (anchors DataFrame, id_cols list)
     """
-    # Use edges that have a year and a ChEMBL clinical phase signal
-    phase_cols = [c for c in edges.columns if 'phase' in c.lower() or 'relation' in c.lower()]
-    year_col = 'year' if 'year' in edges.columns else None
+    year_col  = 'year'  if 'year'  in edges.columns else None
+    score_col = 'score' if 'score' in edges.columns else \
+                'edge_weight' if 'edge_weight' in edges.columns else None
 
     if not year_col:
-        raise ValueError("Edge parquets must have a 'year' column. Run Step 01 with build_event_list.py first.")
+        raise ValueError("Edge parquets must have a 'year' column. Run Step 01 first.")
+    if not score_col:
+        raise ValueError("Edge parquets must have a 'score' or 'edge_weight' column.")
 
-    # Filter to ChEMBL clinical trial edges
-    chembl_mask = edges['datasource'].str.contains('chembl', case=False, na=False) if 'datasource' in edges.columns \
-        else edges['sourceId'].isin(['chembl']) if 'sourceId' in edges.columns \
-        else pd.Series([True] * len(edges))
+    # Filter to ChEMBL edges
+    chembl_mask = (
+        edges['datasource'].str.contains('chembl', case=False, na=False)
+        if 'datasource' in edges.columns else
+        edges['sourceId'].isin(['chembl'])
+        if 'sourceId' in edges.columns else
+        pd.Series([True] * len(edges))
+    )
 
-    # Detect relation column for Phase 2+ filter
-    relation_col = next((c for c in edges.columns if 'relation' in c.lower()), None)
+    chembl = edges[chembl_mask & edges[year_col].notna()].copy()
+    chembl[year_col]  = chembl[year_col].astype(int)
+    chembl[score_col] = pd.to_numeric(chembl[score_col], errors='coerce')
 
-    chembl = edges[chembl_mask].copy()
-    if relation_col:
-        phase2_mask = chembl[relation_col].str.contains('phase_2|phase_3|phase_4|phase2|phase3|phase4',
-                                                         case=False, na=False)
-        chembl = chembl[phase2_mask]
-
-    chembl = chembl[chembl[year_col].notna()].copy()
-    chembl[year_col] = chembl[year_col].astype(int)
-
-    # T=0 = first year in Phase 2+
-    anchors = chembl.groupby(['sourceId', 'targetId'])[year_col].min().reset_index()
-    anchors = anchors.rename(columns={year_col: 'anchor_year', 'sourceId': 'diseaseId_raw', 'targetId': 'targetId_raw'})
-
-    # Detect actual column names
+    # Detect TD identifier columns
     id_cols = [c for c in ['sourceId', 'targetId'] if c in chembl.columns]
-    anchors = chembl.groupby(id_cols)[year_col].min().reset_index().rename(columns={year_col: 'anchor_year'})
+    if not id_cols:
+        raise ValueError(f"Could not detect TD identifier columns. Available: {chembl.columns.tolist()}")
 
-    print(f"   Found {len(anchors):,} TD pairs with a Phase 2+ entry")
+    # T=0: first year with score >= 0.2 (Phase 2 threshold)
+    chembl['phase'] = chembl[score_col].apply(get_phase)
+    
+    phase2_plus = chembl[chembl['phase'] >= 2]
+    print(f"   ChEMBL records with Phase 2+ (score ≥ {ANCHOR_SCORE_MIN}): {len(phase2_plus):,}")
+
+    anchors = (
+        phase2_plus.groupby(id_cols)[year_col]
+        .min().reset_index()
+        .rename(columns={year_col: 'anchor_year'})
+    )
+    
+    # FILTER: Exclude pairs that reached Phase 3+ on or before their anchor year
+    print("   Filtering out pairs already in Phase 3+ at or before anchor year...")
+    pre_success = chembl[chembl['phase'] >= 3].groupby(id_cols)[year_col].min().reset_index()
+    pre_success = pre_success.rename(columns={year_col: 'first_phase3_year'})
+    
+    anchors = anchors.merge(pre_success, on=id_cols, how='left')
+    # If first_phase3_year <= anchor_year, it's not a "pure" advancement prediction
+    anchors = anchors[~(anchors['first_phase3_year'] <= anchors['anchor_year'])].copy()
+    print(f"   Pairs remaining after Phase 3+ pre-filter: {len(anchors):,}")
 
     # Partition tagging
     print(f"🗓  Partitions: Train ≤ {train_max}, Val [{train_max+1}–{val_max}], Test [{val_max+1}–{test_max}]")
@@ -121,30 +157,20 @@ def build_anchor_table(
     anchors = anchors[anchors['partition'] != 'excluded'].copy()
     print(f"   Partition counts:\n{anchors['partition'].value_counts()}")
 
-    # Outcome: did the pair reach Phase 3/4 AFTER anchor year?
-    if relation_col:
-        phase3_mask = (
-            edges[relation_col].str.contains('phase_3|phase_4|phase3|phase4', case=False, na=False)
-            & edges[year_col].notna()
-            & (edges[year_col].astype(float) > anchors['anchor_year'].max())  # rough pre-filter
-        )
-        future = edges[phase3_mask & (edges[year_col].astype(float) <= outcome_max)].copy()
-    else:
-        future = pd.DataFrame()
+    # Outcome: reach Phase 3+ in (anchor_year, outcome_max]
+    # Join chembl with anchors to check pair-specific timing
+    future = chembl[chembl['phase'] >= 3].merge(anchors[id_cols + ['anchor_year']], on=id_cols)
+    future = future[(future[year_col] > future['anchor_year']) & (future[year_col] <= outcome_max)]
+    
+    positive_pairs = set(map(tuple, future[id_cols].drop_duplicates().values))
+    anchors['outcome'] = anchors.apply(
+        lambda row: int(tuple(row[c] for c in id_cols) in positive_pairs), axis=1
+    )
 
-    if not future.empty:
-        future_id_cols = [c for c in id_cols if c in future.columns]
-        positive_pairs = set(map(tuple, future[future_id_cols].drop_duplicates().values))
+    pos_rate = anchors['outcome'].mean() * 100
+    print(f"   Overall positive rate: {pos_rate:.1f}%")
 
-        def is_positive(row):
-            return int(tuple(row[c] for c in id_cols) in positive_pairs)
-
-        anchors['outcome'] = anchors.apply(is_positive, axis=1)
-    else:
-        print("   ⚠️ Could not detect Phase 3/4 transitions — setting all outcomes to 0")
-        anchors['outcome'] = 0
-
-    return anchors
+    return anchors, id_cols
 
 
 # ──────────────────────────────────────────────
@@ -194,27 +220,34 @@ def build_dynamic_features(
 
     print(f"   {len(merged):,} historical evidence records within lookback window")
 
-    # Vectorized harmonic sum per (TD pair, source, relative_year)
+    # Vectorized agg per (TD pair, source, relative_year)
     group_cols = id_cols + [source_col, 'relative_year']
-    print("   Computing harmonic association scores (S)...")
+    print("   Computing composite dynamic features (S, Phase)...")
+    
+    # Map score to phase for features
+    merged['phase'] = merged[score_col].apply(get_phase)
+    
     agg = merged.groupby(group_cols, as_index=False).agg(
-        S=(score_col, lambda x: harmonic_sum(x.values))
+        S=(score_col, lambda x: harmonic_sum(x.values)),
+        P=('phase', 'max')  # Max phase reached by that source in that year
     )
 
-    # Novelty score N = S_t - S_{t-1} (shifted within each TD pair × source group)
+    # Novelty score N = S_t - S_{t-1}
     agg = agg.sort_values(id_cols + [source_col, 'relative_year'])
     agg['S_prev'] = agg.groupby(id_cols + [source_col])['S'].shift(1).fillna(0)
-    agg['N'] = (agg['S'] - agg['S_prev']).clip(lower=0)  # positive novelty only
+    agg['N'] = (agg['S'] - agg['S_prev']).clip(lower=0)
 
     # Pivot: one row per (TD pair, relative_year), columns per source
     print("   Pivoting to wide format (source columns)...")
     s_wide = agg.pivot_table(index=id_cols + ['relative_year'], columns=source_col, values='S', fill_value=0)
     n_wide = agg.pivot_table(index=id_cols + ['relative_year'], columns=source_col, values='N', fill_value=0)
+    p_wide = agg.pivot_table(index=id_cols + ['relative_year'], columns=source_col, values='P', fill_value=0)
 
     s_wide.columns = [f"{c}_S" for c in s_wide.columns]
     n_wide.columns = [f"{c}_N" for c in n_wide.columns]
+    p_wide.columns = [f"{c}_P" for c in p_wide.columns]
 
-    wide = s_wide.join(n_wide).reset_index()
+    wide = s_wide.join(n_wide).join(p_wide).reset_index()
     return wide
 
 
@@ -238,20 +271,11 @@ def build_tft_dataset(
     # 1. Load pre-parsed edge parquets from Step 01
     edges = load_edges(raw_edges_dir, sample_ratio=sample_ratio)
 
-    # Detect TD identifier columns
-    id_cols = []
-    for cand in [('sourceId', 'targetId'), ('diseaseId', 'targetId')]:
-        if all(c in edges.columns for c in cand):
-            id_cols = list(cand)
-            break
-    if not id_cols:
-        raise ValueError(f"Could not detect TD identifier columns. Available: {edges.columns.tolist()}")
+    # 2. Build anchor table (returns anchors + id_cols detected from ChEMBL edges)
+    print("\n⚓ Building anchor table (T=0 = first Phase 2 entry, score ≥ 0.2)...")
+    anchors, id_cols = build_anchor_table(edges, train_max, val_max, test_max, outcome_max)
 
     print(f"   TD identifier columns: {id_cols}")
-
-    # 2. Build anchor table
-    print("\n⚓ Building anchor table (T=0 = first Phase 2 entry)...")
-    anchors = build_anchor_table(edges, train_max, val_max, test_max, outcome_max)
 
     # 3. Build dynamic source-level sequences
     dynamic = build_dynamic_features(edges, anchors, id_cols, lookback)
@@ -268,7 +292,7 @@ def build_tft_dataset(
         final = grid.copy()
 
     # Fill NAs
-    feature_cols = [c for c in final.columns if c.endswith('_S') or c.endswith('_N')]
+    feature_cols = [c for c in final.columns if any(c.endswith(suffix) for suffix in ['_S', '_N', '_P'])]
     final[feature_cols] = final[feature_cols].fillna(0)
 
     # 5. Summary

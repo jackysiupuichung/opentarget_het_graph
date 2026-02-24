@@ -72,7 +72,7 @@ def build_temporal_tensor(
         T = lookback window
         F = number of feature columns (_S and _N columns)
     """
-    feature_cols = sorted([c for c in longitudinal.columns if c.endswith('_S') or c.endswith('_N')])
+    feature_cols = sorted([c for c in longitudinal.columns if any(c.endswith(s) for s in ['_S', '_N', '_P'])])
     T = lookback
     N = len(anchors)
     F = len(feature_cols)
