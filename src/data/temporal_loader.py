@@ -267,32 +267,43 @@ def to_time_agnostic(data: HeteroData) -> HeteroData:
         elif 'edge_attr' in new_data[et]:
             edge_attr = new_data[et].edge_attr
         
+        has_time = 'edge_time' in new_data[et]
+        time_attr = new_data[et].edge_time.float().unsqueeze(-1) if has_time else None  # [E, 1]
+
         if edge_attr is not None:
-            # Coalesce with max reduction
-            new_index, new_attr = coalesce(
-                edge_index, 
-                edge_attr, 
-                reduce='max'
-            )
-            
-            new_data[et].edge_index = new_index
-            
-            # Restore attribute name
-            if 'edge_weight' in new_data[et]:
-                new_data[et].edge_weight = new_attr.squeeze() # [N] or [N, 1]
-            elif 'edge_attr' in new_data[et]:
-                new_data[et].edge_attr = new_attr
-                
-        else:
-            new_index = coalesce(
-                edge_index, 
-                None
-            )
+            # Stack time alongside score so both are coalesced in one pass
+            if time_attr is not None:
+                combined = torch.cat([edge_attr, time_attr], dim=-1)  # [E, score_dim+1]
+                new_index, new_combined = coalesce(edge_index, combined, reduce='max')
+                new_attr = new_combined[:, :-1]
+                new_time = new_combined[:, -1].long()
+            else:
+                new_index, new_attr = coalesce(edge_index, edge_attr, reduce='max')
+                new_time = None
+
             new_data[et].edge_index = new_index
 
-        # Remove temporal attributes
-        if 'edge_time' in new_data[et]:
-            del new_data[et].edge_time
+            # Restore attribute name
+            if 'edge_weight' in new_data[et]:
+                new_data[et].edge_weight = new_attr.squeeze()  # [N] or [N, 1]
+            elif 'edge_attr' in new_data[et]:
+                new_data[et].edge_attr = new_attr
+
+        else:
+            if time_attr is not None:
+                new_index, new_time_combined = coalesce(edge_index, time_attr, reduce='max')
+                new_time = new_time_combined[:, 0].long()
+            else:
+                new_index = coalesce(edge_index, None)
+                new_time = None
+            new_data[et].edge_index = new_index
+
+        # Update or remove edge_time
+        if has_time:
+            if new_time is not None:
+                new_data[et].edge_time = new_time
+            else:
+                del new_data[et].edge_time
             
         num_edges_after = new_data[et].edge_index.size(1)
         print(f"   {et}: {num_edges_before:,} -> {num_edges_after:,} edges (Max Aggregation)")

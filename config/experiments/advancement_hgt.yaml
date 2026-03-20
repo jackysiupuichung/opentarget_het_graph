@@ -1,0 +1,24 @@
+experiment:
+  name: advancement_hgt
+
+data:
+  graph_file: output/graph/hetero_graph_with_advancement.pt
+  mappings_file: output/graph/temporal_graph_mappings.pt
+
+model:
+  name: hgt
+  hidden_dim: 64
+  num_heads: 4
+  num_layers: 2
+  dropout: 0.1
+
+train:
+  output_dir: runs/advancement_hgt
+  num_epochs: 50
+  lr: 0.001
+  weight_decay: 0.0001
+  batch_size: 512
+  num_neighbors: [20, 10]
+  early_stopping:
+    enabled: true
+    patience: 10
