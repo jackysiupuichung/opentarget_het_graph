@@ -1,9 +1,10 @@
 #!/bin/bash
-#$ -pe smp 4
-#$ -l h_vmem=32G
-#$ -l h_rt=12:0:0
-#$ -cwd
-#$ -j y
+#SBATCH -J collecting_node_features_03
+#SBATCH -o %x.o%j
+#SBATCH -p compute
+#SBATCH -n 4
+#SBATCH -t 12:0:0
+#SBATCH --mem-per-cpu=32G
 
 set -euo pipefail
 

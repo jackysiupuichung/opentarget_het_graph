@@ -1,12 +1,11 @@
 #!/bin/bash
-#$ -l tmem=16G
-#$ -l h_rt=72:00:00
-#$ -l gpu=true
-#$ -N event_hgt_pretrain
-#$ -wd /data/home/bty414/opentarget_temporal_study/src/opentarget_het_graph
-#$ -j y
-#$ -o logs/event_hgt_pretrain.log
-#$ -t 1
+#SBATCH -J event_hgt_pretrain
+#SBATCH -o %x.o%j
+#SBATCH -p gpulong
+#SBATCH -n 1
+#SBATCH -t 72:0:0
+#SBATCH --mem-per-cpu=16G
+#SBATCH --gres=gpu:1
 
 # Event-based HGT Self-Supervised Pretraining with RTE 
 # Uses causal temporal sampling with Relative Temporal Encoding
@@ -14,7 +13,7 @@
 hostname
 date
 
-source /data/home/bty414/opentarget_temporal_study/src/opentarget_het_graph/.venv/bin/activate
+source .venv/bin/activate
 
 echo "Starting Event-based HGT Pretraining with RTE..."
 echo "Config: config/experiments/event_hgt.yaml"

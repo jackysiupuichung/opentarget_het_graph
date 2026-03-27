@@ -1,9 +1,10 @@
 #!/bin/bash
-#$ -pe smp 1
-#$ -l h_vmem=16G
-#$ -l h_rt=1:0:0
-#$ -cwd
-#$ -j y
+#SBATCH -J building_event_graph_02
+#SBATCH -o %x.o%j
+#SBATCH -p compute
+#SBATCH -n 1
+#SBATCH -t 1:0:0
+#SBATCH --mem-per-cpu=16G
 
 set -euo pipefail
 

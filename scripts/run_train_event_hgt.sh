@@ -1,10 +1,11 @@
 #!/bin/bash
-#$ -l h_rt=240:0:0
-#$ -l h_vmem=11G
-#$ -pe smp 8
-#$ -l gpu=1
-#$ -cwd
-#$ -j y
+#SBATCH -J train_event_hgt
+#SBATCH -o %x.o%j
+#SBATCH -p gpulong
+#SBATCH -n 8
+#SBATCH -t 240:0:0
+#SBATCH --mem-per-cpu=11G
+#SBATCH --gres=gpu:1
 
 set -euo pipefail
 

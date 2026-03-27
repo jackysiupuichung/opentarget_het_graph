@@ -1,12 +1,11 @@
 #!/bin/bash
-#$ -l tmem=16G
-#$ -l h_rt=24:00:00
-#$ -l gpu=true
-#$ -N event_hgt_finetune
-#$ -wd /data/home/bty414/opentarget_temporal_study/src/opentarget_het_graph
-#$ -j y
-#$ -o logs/event_hgt_finetune.log
-#$ -t 1
+#SBATCH -J event_hgt_finetune
+#SBATCH -o %x.o%j
+#SBATCH -p gpushort
+#SBATCH -n 1
+#SBATCH -t 24:0:0
+#SBATCH --mem-per-cpu=16G
+#SBATCH --gres=gpu:1
 
 # Event-based HGT Clinical Multi-Task Finetuning
 # Uses pretrained event HGT encoder with RTE
@@ -14,7 +13,7 @@
 hostname
 date
 
-source /data/home/bty414/opentarget_temporal_study/src/opentarget_het_graph/.venv/bin/activate
+source .venv/bin/activate
 
 echo "Starting Event-based HGT Finetuning..."
 echo "Config: config/experiments/event_hgt.yaml"

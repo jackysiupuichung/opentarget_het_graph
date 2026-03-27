@@ -1,9 +1,10 @@
 #!/bin/bash
-#$ -pe smp 1
-#$ -l h_vmem=32G
-#$ -l h_rt=1:0:0
-#$ -cwd
-#$ -j y
+#SBATCH -J collecting_edges_01
+#SBATCH -o %x.o%j
+#SBATCH -p compute
+#SBATCH -n 1
+#SBATCH -t 1:0:0
+#SBATCH --mem-per-cpu=32G
 
 set -euo pipefail
 
@@ -28,7 +29,6 @@ RAW_EDGES_DIR="${KG_OUTPUT_DIR}/edges"
 RAW_NODES_DIR="${KG_OUTPUT_DIR}/nodes"
 STATIC_EDGES_DIR="${KG_OUTPUT_DIR}/static_edges"
 EVENT_OUTPUT_DIR="${OUTPUT_BASE}/progression"
-EVENTS_FILE="${EVENT_OUTPUT_DIR}/events.parquet"
 
 # === 0. KG Pipeline (Raw Evidence -> Nodes/Edges) ===
 echo "🚀 [1/2] Running KG Pipeline..."

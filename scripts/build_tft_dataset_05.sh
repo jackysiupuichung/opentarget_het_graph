@@ -7,11 +7,12 @@
 #   bash scripts/build_tft_dataset_05.sh
 #   bash scripts/build_tft_dataset_05.sh --sample-ratio 0.01   # fast test run
 
-#$ -pe smp 1
-#$ -l h_vmem=32G
-#$ -l h_rt=4:0:0
-#$ -cwd
-#$ -j y
+#SBATCH -J build_tft_dataset_05
+#SBATCH -o %x.o%j
+#SBATCH -p compute
+#SBATCH -n 1
+#SBATCH -t 4:0:0
+#SBATCH --mem-per-cpu=32G
 
 set -euo pipefail
 
@@ -33,7 +34,7 @@ OUTCOME_MAX=2024
 LOOKBACK=10
 
 # Optional: pass --sample-ratio 0.01 for quick test
-EXTRA_ARGS="${@}"
+# EXTRA_ARGS="${@}"
 
 # ── Step 05a: Build longitudinal parquet ──
 echo "🚀 [05a] Building TFT longitudinal dataset..."
@@ -47,8 +48,7 @@ python preprocessing/temporal_series/build_tft_dataset.py \
   --val-max       "$VAL_MAX" \
   --test-max      "$TEST_MAX" \
   --outcome-max   "$OUTCOME_MAX" \
-  --lookback      "$LOOKBACK" \
-  $EXTRA_ARGS
+  --lookback      "$LOOKBACK"
 
 echo ""
 echo "✅ TFT longitudinal dataset saved to: $TFT_OUTPUT_DIR"
