@@ -87,6 +87,9 @@ def load_static_edges(static_dir: str) -> pd.DataFrame:
             # Add default score if missing
             if 'score' not in df.columns:
                 df['score'] = 1.0
+
+            # Static edges have no novelty signal — set to 1.0 (fully novel / always present)
+            df['edge_novelty'] = 1.0
                 
             # Ensure no temporal columns interfere (force them to be null or handled)
             # Static edges have NO edge_time
@@ -210,6 +213,8 @@ def build_hetero_graph(edges: pd.DataFrame, edge_type_mode: str = 'relation_data
     has_edge_time = 'edge_time' in edges.columns
     has_edge_weight = 'edge_weight' in edges.columns
     has_score = 'score' in edges.columns and not has_edge_weight
+    # edge_novelty is always expected alongside edge_weight
+    has_edge_novelty = 'edge_novelty' in edges.columns
     
     # Group by edge type based on mode
     if edge_type_mode == 'relation_datasource':
@@ -250,19 +255,19 @@ def build_hetero_graph(edges: pd.DataFrame, edge_type_mode: str = 'relation_data
         
         hetero_data[edge_type_key].edge_index = edge_index
         
-        # Add edge attributes
+        # Add edge attributes — always [E, 2]: [edge_weight, edge_novelty]
         if has_edge_weight:
-            # Event-based: use edge_weight
-            hetero_data[edge_type_key].edge_attr = torch.tensor(
-                group['edge_weight'].values,
+            w = torch.tensor(group['edge_weight'].values, dtype=torch.float).unsqueeze(-1)
+            n = torch.tensor(
+                group['edge_novelty'].fillna(0.0).values if has_edge_novelty else [0.0] * len(group),
                 dtype=torch.float
             ).unsqueeze(-1)
+            hetero_data[edge_type_key].edge_attr = torch.cat([w, n], dim=-1)
         elif has_score:
-            # Snapshot-based: use score
-            hetero_data[edge_type_key].edge_attr = torch.tensor(
-                group['score'].values,
-                dtype=torch.float
-            ).unsqueeze(-1)
+            # Snapshot-based: use score; novelty not available → 0
+            w = torch.tensor(group['score'].values, dtype=torch.float).unsqueeze(-1)
+            n = torch.zeros(len(group), 1, dtype=torch.float)
+            hetero_data[edge_type_key].edge_attr = torch.cat([w, n], dim=-1)
         
         # Add temporal attribute
         if has_edge_time:
@@ -274,7 +279,8 @@ def build_hetero_graph(edges: pd.DataFrame, edge_type_mode: str = 'relation_data
         num_edges = edge_index.size(1)
         attrs_str = []
         if has_edge_weight or has_score:
-            attrs_str.append("edge_attr")
+            edge_attr_shape = tuple(hetero_data[edge_type_key].edge_attr.shape)
+            attrs_str.append(f"edge_attr{list(edge_attr_shape)}")
         if has_edge_time:
             attrs_str.append("edge_time")
         
@@ -289,19 +295,68 @@ def build_hetero_graph(edges: pd.DataFrame, edge_type_mode: str = 'relation_data
     
     return hetero_data, mappings
 
+def load_advancement_edges(train_csv: str, test_csv: str) -> pd.DataFrame:
+    """
+    Load clinical trial advancement edges from CSV files and format them
+    as graph edges compatible with build_hetero_graph.
+
+    Args:
+        train_csv: Path to train_dataset.csv
+        test_csv: Path to test_dataset.csv
+
+    Returns:
+        DataFrame with columns: sourceId, targetId, source_type, target_type,
+        relation, datasourceId, edge_time, edge_weight
+    """
+    print(f"\n📂 Loading advancement edges...")
+    dfs = []
+    for path, label in [(train_csv, "train"), (test_csv, "test")]:
+        if not os.path.exists(path):
+            print(f"   ⚠️  {label} CSV not found: {path}")
+            continue
+        df = pd.read_csv(path)
+        print(f"   Loaded {len(df):,} rows from {label} ({Path(path).name})")
+        dfs.append(df)
+
+    if not dfs:
+        print("   ❌ No advancement CSVs loaded")
+        return pd.DataFrame()
+
+    df = pd.concat(dfs, ignore_index=True)
+    print(f"   Total advancement rows: {len(df):,}")
+
+    adv = pd.DataFrame({
+        "sourceId":     df["target_id"].astype(str),
+        "targetId":     df["disease_id"].astype(str),
+        "source_type":  "target",
+        "target_type":  "disease",
+        "relation":     "advancement",
+        "datasourceId": "advancement",
+        "edge_time":    df["transition_year"].astype(int),
+        "edge_weight":  df["outcome"].astype(float),
+        "edge_novelty": 1.0,  # no novelty decay applies to advancement labels
+    })
+    print(f"✅ Advancement edges ready: {len(adv):,}")
+    return adv
+
+
 def build_event_graph(
     event_file: str,
     output_file: str,
     static_edges_dir: str = None,
-    edge_type_mode: str = 'relation_datasource'
+    edge_type_mode: str = 'relation_datasource',
+    advancement_train_csv: str = None,
+    advancement_test_csv: str = None,
 ):
     """
     Build HeteroData from event list.
-    
+
     Args:
         event_file: Path to events parquet file
         output_file: Output .pt file
         static_edges_dir: Optional directory with static edges
+        advancement_train_csv: Optional path to advancement train CSV
+        advancement_test_csv: Optional path to advancement test CSV
     """
     print("\n" + "="*80)
     print("BUILDING EVENT-BASED TEMPORAL GRAPH")
@@ -325,15 +380,25 @@ def build_event_graph(
         print(f"❌ Missing columns: {missing}")
         return
     
+    # Load advancement edges (injected before static edges so their nodes are registered)
+    if advancement_train_csv or advancement_test_csv:
+        adv_edges = load_advancement_edges(
+            advancement_train_csv or "",
+            advancement_test_csv or "",
+        )
+        if not adv_edges.empty:
+            events = pd.concat([events, adv_edges], ignore_index=True)
+            print(f"   Events + advancement: {len(events):,} total rows")
+
     # Load static edges
     static_edges = pd.DataFrame()
     if static_edges_dir:
         static_edges = load_static_edges(static_edges_dir)
-        
+
     # Combine
     # Note: Static edges have NaNs for edge_time and edge_weight (unless score mapped check)
     # We should normalize columns before concat
-    
+
     all_edges = events
     
     if not static_edges.empty:
@@ -434,15 +499,29 @@ def main():
         choices=["relation_datasource", "relation_only"],
         help="Edge type naming: 'relation_datasource' (e.g., clinical_trial::chembl) or 'relation_only' (e.g., clinical_trial)"
     )
-    
+    parser.add_argument(
+        "--advancement-train-csv",
+        type=str,
+        default=None,
+        help="Path to advancement train CSV (optional)"
+    )
+    parser.add_argument(
+        "--advancement-test-csv",
+        type=str,
+        default=None,
+        help="Path to advancement test CSV (optional)"
+    )
+
     args = parser.parse_args()
-    
+
     # Build graph
     build_event_graph(
         event_file=args.input,
         output_file=args.output,
         static_edges_dir=args.static_edges,
-        edge_type_mode=args.edge_type_mode
+        edge_type_mode=args.edge_type_mode,
+        advancement_train_csv=args.advancement_train_csv,
+        advancement_test_csv=args.advancement_test_csv,
     )
 
 

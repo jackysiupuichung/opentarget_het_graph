@@ -11,33 +11,30 @@ set -euo pipefail
 source .venv/bin/activate
 
 # === Configuration ===
-# OUTPUT_BASE="/data/scratch/bty414/opentarget_evidences/23.06"
-OUTPUT_BASE="output"
+OUTPUT_BASE="/data/scratch/bty414/opentarget_evidences/23.06"
+# OUTPUT_BASE="output"
 EVENT_OUTPUT_DIR="${OUTPUT_BASE}/progression"
 FEATURE_OUTPUT_DIR="${OUTPUT_BASE}/features/processed"
 FINAL_GRAPH_DIR="${OUTPUT_BASE}/graph"
 
-GRAPH_STRUCT_FILE="${EVENT_OUTPUT_DIR}/temporal_graph_sample.pt"
-FINAL_GRAPH_FILE="${FINAL_GRAPH_DIR}/hetero_graph_with_features_sample.pt"
+# === Attach Features to Graph (datasource-level and datatype-level) ===
 
-# === Attach Features to Graph ===
-echo "🚀 Attaching Features to Graph..."
-echo "   Graph Structure: $GRAPH_STRUCT_FILE"
-echo "   Features: $FEATURE_OUTPUT_DIR"
-echo "   Output: $FINAL_GRAPH_FILE"
-
+# --- Datasource-level ---
+echo "🚀 Attaching Features (datasource-level)..."
 python preprocessing/temporal_graph/pipeline/attach_features.py \
-  --graph-file "$GRAPH_STRUCT_FILE" \
-  --output-file "$FINAL_GRAPH_FILE" \
+  --graph-file "${EVENT_OUTPUT_DIR}/temporal_graph_datasource.pt" \
+  --output-file "${FINAL_GRAPH_DIR}/hetero_graph_with_features_datasource.pt" \
   --feature-dir "$FEATURE_OUTPUT_DIR"
+echo "✅ ${FINAL_GRAPH_DIR}/hetero_graph_with_features_datasource.pt"
 
-# # === Analysis ===
-# echo ""
-# echo "🚀 Analyzing Final Graph..."
-# python -m src.data.analyze_graph \
-#   --file "$FINAL_GRAPH_FILE" \
-#   --output "${OUTPUT_BASE}/analysis"
+# --- Datatype-level ---
+echo ""
+echo "🚀 Attaching Features (datatype-level)..."
+python preprocessing/temporal_graph/pipeline/attach_features.py \
+  --graph-file "${EVENT_OUTPUT_DIR}/temporal_graph_datatype.pt" \
+  --output-file "${FINAL_GRAPH_DIR}/hetero_graph_with_features_datatype.pt" \
+  --feature-dir "$FEATURE_OUTPUT_DIR"
+echo "✅ ${FINAL_GRAPH_DIR}/hetero_graph_with_features_datatype.pt"
 
-# echo ""
+echo ""
 echo "✅ Graph Assembly Complete!"
-echo "   Final Graph: $FINAL_GRAPH_FILE"

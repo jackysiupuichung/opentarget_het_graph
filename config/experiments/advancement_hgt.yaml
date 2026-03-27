@@ -2,7 +2,7 @@ experiment:
   name: advancement_hgt
 
 data:
-  graph_file: output/graph/hetero_graph_with_advancement.pt
+  graph_file: output/graph/hetero_graph_with_features.pt
   mappings_file: output/graph/temporal_graph_mappings.pt
 
 model:

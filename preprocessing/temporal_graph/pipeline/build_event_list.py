@@ -39,6 +39,104 @@ def max_score(scores):
     return np.max(scores)
 
 
+# Novelty decay parameters (Open Targets paper values)
+NOVELTY_SCALE = 2.0   # logistic steepness k
+NOVELTY_SHIFT = 3.0   # sigmoid midpoint m
+NOVELTY_WINDOW = 5    # years after a peak to apply decay
+
+
+def compute_novelty_series(year_scores: np.ndarray,
+                            scale: float = NOVELTY_SCALE,
+                            shift: float = NOVELTY_SHIFT,
+                            window: int = NOVELTY_WINDOW) -> np.ndarray:
+    """
+    Given a score time series for one (sourceId, targetId, datasourceId) triplet,
+    return a novelty time series of the same length.
+
+    Novelty at year t = max over all peak years p <= t within window of:
+        peak_p / (1 + exp(scale * ((t - p) - shift)))
+    where peak_p = score_p - score_{p-1} > 0.
+
+    Args:
+        year_scores: 1-D array of cumulative scores, one per year in `years`
+        years:       1-D int array of corresponding years (sorted ascending)
+        scale:       logistic steepness k
+        shift:       sigmoid midpoint m
+        window:      number of years after peak year to apply decay
+
+    Returns:
+        novelty: 1-D float array, same length as year_scores
+    """
+    n = len(year_scores)
+    novelty = np.zeros(n, dtype=float)
+
+    for p in range(n):
+        # Score delta vs previous year (first year compared against 0)
+        prev_score = year_scores[p - 1] if p > 0 else 0.0
+        peak = year_scores[p] - prev_score
+        if peak <= 0:
+            continue
+        # Apply logistic decay over the window
+        for w in range(window + 1):
+            t = p + w
+            if t >= n:
+                break
+            nov = peak / (1.0 + np.exp(scale * (w - shift)))
+            if nov > novelty[t]:
+                novelty[t] = nov
+
+    return novelty
+
+
+def compute_novelty_per_datasource(dynamic_edges: pd.DataFrame,
+                                    start_year: int, end_year: int,
+                                    aggregation_method: str = 'harmonic_sum') -> pd.DataFrame:
+    """
+    Compute per-datasource novelty scores for every (sourceId, targetId, datasourceId)
+    triplet across the full year range.
+
+    Uses the same cumulative score series as the main loop so novelty peaks align
+    with actual score changes.
+
+    Returns:
+        DataFrame with columns: sourceId, targetId, source_type, target_type,
+                                 relation, datasourceId, year, novelty
+    """
+    years = np.arange(start_year, end_year + 1)
+    records = []
+
+    id_cols = ['sourceId', 'targetId', 'source_type', 'target_type', 'relation', 'datasourceId']
+    groups = dynamic_edges.groupby(id_cols)
+
+    for key, grp in tqdm(groups, desc="Computing novelty"):
+        # Build cumulative score series for this triplet
+        year_scores = np.zeros(len(years), dtype=float)
+        for i, yr in enumerate(years):
+            cumulative = grp[grp['year'] <= yr]['score']
+            if len(cumulative):
+                year_scores[i] = aggregate_scores(cumulative.values, method=aggregation_method)
+
+        novelty_series = compute_novelty_series(year_scores)
+
+        src_id, tgt_id, src_type, tgt_type, relation, datasource = key
+        for i, yr in enumerate(years):
+            if novelty_series[i] > 0:
+                records.append({
+                    'sourceId':    src_id,
+                    'targetId':    tgt_id,
+                    'source_type': src_type,
+                    'target_type': tgt_type,
+                    'relation':    relation,
+                    'datasourceId': datasource,
+                    'year':        yr,
+                    'novelty':     novelty_series[i],
+                })
+
+    if not records:
+        return pd.DataFrame(columns=id_cols + ['year', 'novelty'])
+    return pd.DataFrame(records)
+
+
 def aggregate_scores(scores, method='harmonic_sum'):
     """Aggregate scores using specified method.
     
@@ -136,15 +234,16 @@ def build_event_list(
 ):
     """
     Build temporal event graph from raw edges using cumulative aggregation.
-    
-    Creates single event list with edge_time and edge_weight.
-    
+
+    Always outputs edge_weight (harmonic sum score) and edge_novelty as separate columns.
+
     Args:
         input_dir: Directory with raw edges
         config_path: Path to progression config
         output_file: Output parquet file
         aggregation_method: 'harmonic_sum' or 'max' (default: 'harmonic_sum')
         sample_ratio: Optional float (0.0-1.0) to sample edges (e.g., 0.01 for 1:100 test)
+        datatype_mapping_file: Optional path to datatype mapping YAML
     """
     print("\n" + "="*80)
     sample_info = f" [SAMPLE: {sample_ratio*100:.1f}%]" if sample_ratio else ""
@@ -310,11 +409,35 @@ def build_event_list(
     
     events = events[keep_mask]
     print(f"✅ {len(events):,} events after filtering (score changes only)")
-    
-    # Rename for clarity
+
+    # ── Novelty computation ────────────────────────────────────────────────────
+    print(f"\n🔬 Computing per-datasource novelty...")
+    # Always computed at datasource level then aggregated up
+    novelty_ds = compute_novelty_per_datasource(
+        dynamic_edges, start_year, end_year, aggregation_method=aggregation_method
+    )
+    print(f"   Novelty records: {len(novelty_ds):,}")
+
+    if datatype_mapping:
+        # Aggregate datasource novelties → datatype novelty (same two-level scheme as scores)
+        novelty_ds = add_datatype_info(novelty_ds, datatype_mapping)
+        novelty_ds['weighted_novelty'] = novelty_ds['novelty'] * novelty_ds['datasource_weight']
+        novelty_agg = novelty_ds.groupby(group_cols + ['year'], as_index=False).agg(
+            novelty=('weighted_novelty', lambda x: harmonic_sum(x.values))
+        )
+    else:
+        novelty_agg = novelty_ds[group_cols + ['year', 'novelty']].copy()
+
+    # Merge novelty into events (left join — keep all score events, fill missing novelty with 0)
+    events = events.merge(novelty_agg, on=group_cols + ['year'], how='left')
+    events['novelty'] = events['novelty'].fillna(0.0)
+    print(f"✅ Novelty merged into events")
+
+    # ── Rename columns ─────────────────────────────────────────────────────────
     events = events.rename(columns={
         'year': 'edge_time',
-        'score': 'edge_weight'
+        'score': 'edge_weight',
+        'novelty': 'edge_novelty',
     })
     
     # Save
@@ -384,9 +507,8 @@ def main():
         default=None,
         help="Path to datatype mapping YAML (enables datatype-level aggregation). Default: None (datasource-level)"
     )
-    
     args = parser.parse_args()
-    
+
     build_event_list(
         input_dir=args.input_dir,
         config_path=args.config,

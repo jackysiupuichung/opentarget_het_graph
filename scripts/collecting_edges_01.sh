@@ -44,13 +44,26 @@ python preprocessing/temporal_graph/pipeline/kg_pipeline.py \
   --edge-output "$RAW_EDGES_DIR" \
   --static-edge-output "$STATIC_EDGES_DIR"
 
-# === 1. Build Event List ===
-echo "🚀 [2/3] Building Event List..."
+# === 1. Build Event Lists ===
+echo "🚀 [2/3] Building Event Lists (datasource-level and datatype-level)..."
 if [ ! -f "$CONFIG" ]; then echo "❌ Config $CONFIG not found!"; exit 1; fi
 
+EVENTS_DATASOURCE_FILE="${EVENT_OUTPUT_DIR}/events_datasource.parquet"
+EVENTS_DATATYPE_FILE="${EVENT_OUTPUT_DIR}/events_datatype.parquet"
+
+# --- Datasource-level ---
+echo "   [datasource-level]"
 python preprocessing/temporal_graph/pipeline/build_event_list.py \
   --input-dir "$RAW_EDGES_DIR" \
   --config "$CONFIG" \
-  --output "$EVENTS_FILE" \
-  --aggregation-method "max" \
+  --output "$EVENTS_DATASOURCE_FILE" \
+  --aggregation-method "harmonic_sum"
+
+# --- Datatype-level ---
+echo "   [datatype-level]"
+python preprocessing/temporal_graph/pipeline/build_event_list.py \
+  --input-dir "$RAW_EDGES_DIR" \
+  --config "$CONFIG" \
+  --output "$EVENTS_DATATYPE_FILE" \
+  --aggregation-method "harmonic_sum" \
   --datatype-mapping "config/datatype_mapping.yaml"

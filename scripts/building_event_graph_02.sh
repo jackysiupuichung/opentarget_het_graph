@@ -16,19 +16,33 @@ OUTPUT_BASE="/data/scratch/bty414/opentarget_evidences/23.06"
 KG_OUTPUT_DIR="${OUTPUT_BASE}/evidences"
 STATIC_EDGES_DIR="${KG_OUTPUT_DIR}/static_edges"
 EVENT_OUTPUT_DIR="${OUTPUT_BASE}/progression"
-EVENTS_FILE="${EVENT_OUTPUT_DIR}/events.parquet"
 
-GRAPH_STRUCT_FILE="${EVENT_OUTPUT_DIR}/temporal_graph.pt"
+ADV_TRAIN="data/clinical_trial_advancement/23.06/train_dataset.csv"
+ADV_TEST="data/clinical_trial_advancement/23.06/test_dataset.csv"
 
-# === Build Graph Structure ===
-echo "🚀 Building Event Graph Structure..."
+# === Build Graph Structures (datasource-level and datatype-level) ===
+
+# --- Datasource-level ---
+echo "🚀 Building Event Graph (datasource-level)..."
 python preprocessing/temporal_graph/pipeline/build_event_graph.py \
-  --input "$EVENTS_FILE" \
-  --output "$GRAPH_STRUCT_FILE" \
+  --input "${EVENT_OUTPUT_DIR}/events_datasource.parquet" \
+  --output "${EVENT_OUTPUT_DIR}/temporal_graph_datasource.pt" \
   --static-edges "$STATIC_EDGES_DIR" \
-  --edge-type-mode relation_only
+  --edge-type-mode relation_only \
+  --advancement-train-csv "$ADV_TRAIN" \
+  --advancement-test-csv "$ADV_TEST"
 
+echo "✅ Datasource graph: ${EVENT_OUTPUT_DIR}/temporal_graph_datasource.pt"
+
+# --- Datatype-level ---
 echo ""
-echo "✅ Event Graph Built!"
-echo "   Graph: $GRAPH_STRUCT_FILE"
-echo "   Mappings: ${GRAPH_STRUCT_FILE/_graph.pt/_graph_mappings.pt}"
+echo "🚀 Building Event Graph (datatype-level)..."
+python preprocessing/temporal_graph/pipeline/build_event_graph.py \
+  --input "${EVENT_OUTPUT_DIR}/events_datatype.parquet" \
+  --output "${EVENT_OUTPUT_DIR}/temporal_graph_datatype.pt" \
+  --static-edges "$STATIC_EDGES_DIR" \
+  --edge-type-mode relation_only \
+  --advancement-train-csv "$ADV_TRAIN" \
+  --advancement-test-csv "$ADV_TEST"
+
+echo "✅ Datatype graph: ${EVENT_OUTPUT_DIR}/temporal_graph_datatype.pt"
