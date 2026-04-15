@@ -1,0 +1,58 @@
+experiment:
+  name: advancement_lambdarank_tune
+
+data:
+  graph_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/graph/hetero_graph_with_features_datatype.pt
+  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/progression/temporal_graph_datatype_mappings.pt
+
+model:
+  name: hgt
+  hidden_dim: 128
+  num_heads: 4
+  num_layers: 2
+  dropout: 0.5
+  use_rte: false
+  use_edge_features: true
+  edge_feat_cols: [0, 1]
+  edge_feat_dim: 2
+
+train:
+  output_dir: runs/advancement_lambdarank_tune
+  num_epochs: 50
+  lr: 0.0001
+  weight_decay: 0.005
+  eta_min: 1.0e-6
+  batch_size: 512
+  num_neighbors: [20, 10]
+  lambdarank:
+    sigma: 1.0
+    ndcg_k: 100
+  early_stopping:
+    enabled: true
+    patience: 5
+    metric: ndcg@10
+
+tune:
+  study_name: advancement_lambdarank_tune
+  n_trials: 50
+  metric: val/ndcg@10
+
+  search_space:
+    # model capacity
+    hidden_dim:       [32, 64, 128]
+    num_heads:        [1, 2]
+    num_layers:       {low: 1, high: 2}
+    dropout:          {low: 0.1, high: 0.6, step: 0.1}
+
+    # optimiser
+    lr:               {low: 3.0e-5, high: 5.0e-4, log: true}
+    weight_decay:     {low: 1.0e-4, high: 1.0e-2, log: true}
+    cosine_t_max:     [5, 10, 20]
+
+    # data loading
+    batch_size:       [256, 512, 1024]
+    num_neighbors_0:  [10, 20, 30]
+    num_neighbors_1:  [5, 10, 20]
+
+    # LambdaRank
+    sigma:            {low: 0.5, high: 2.0}

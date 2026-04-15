@@ -19,6 +19,8 @@ dependencies = [
     "pytorch-lightning>=2.5.4",
     "omegaconf>=2.3.0",
     "scipy>=1.17.0",
+    "optuna>=4.8.0",
+    "plotly>=6.6.0",
 ]
 
 

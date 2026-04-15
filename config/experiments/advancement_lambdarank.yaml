@@ -1,0 +1,34 @@
+experiment:
+  name: advancement_lambdarank
+
+data:
+  graph_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/graph/hetero_graph_with_features_datatype.pt
+  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/progression/temporal_graph_datatype_mappings.pt
+
+model:
+  name: hgt
+  hidden_dim: 128
+  num_heads: 4
+  num_layers: 2
+  dropout: 0.5
+  use_rte: false
+  use_edge_features: true
+  edge_feat_cols: [0, 1]
+  edge_feat_dim: 2
+
+train:
+  output_dir: runs/advancement_lambdarank
+  num_epochs: 50
+  lr: 0.0001
+  weight_decay: 0.005
+  eta_min: 1e-6
+  cosine_t_max: 10
+  batch_size: 512
+  num_neighbors: [20, 10]
+  lambdarank:
+    sigma: 1.0
+    ndcg_k: 100
+  early_stopping:
+    enabled: true
+    patience: 5
+    metric: ndcg@10

@@ -3,7 +3,7 @@
 Train HGT for clinical trial advancement link prediction.
 
 - Context graph: all non-advancement edges, full temporal structure (no collapse by default)
-- Train/val split: chronological 85/15 on train_dataset rows (transition_year <= 2013)
+- Train/val split: chronological by year (train: <= 2010, val: 2011–2015)
 - Test: original test_dataset rows (transition_year >= 2016)
 - Task: binary link prediction (outcome 0/1), BCE loss
 - Output: best_model.pt, results.yaml, test_predictions.parquet
@@ -57,26 +57,26 @@ from src.models.utils import build_model
 
 
 ADV_ETYPE = ("target", "advancement", "disease")
-TRAIN_YEAR_MAX = 2013   # transition years from train_dataset.csv
+TRAIN_YEAR_MAX = 2015   # transition years from train_dataset.csv
 TEST_YEAR_MIN  = 2016   # transition years from test_dataset.csv
 
 
-def split_advancement_edges(data, train_quantile=0.85):
+def split_advancement_edges(data, cutoff_year=2010):
     """
     Chronological split of advancement edges.
+
+    cutoff_year=2010 is chosen so the val class balance (~7.3% positive) matches
+    the test set (~8.1%); see the per-year/cutoff sweep for derivation.
 
     Returns
     -------
     train_mask, val_mask, test_mask : BoolTensor[num_adv_edges]
-    cutoff_year : int  (85th percentile transition_year among train rows)
+    cutoff_year : int
     """
     edge_time = data[ADV_ETYPE].edge_time  # [E]
 
     train_year_mask = edge_time <= TRAIN_YEAR_MAX
     test_year_mask  = edge_time >= TEST_YEAR_MIN
-
-    train_years = edge_time[train_year_mask].float()
-    cutoff_year = int(torch.quantile(train_years, train_quantile).item())
 
     train_mask = train_year_mask & (edge_time <= cutoff_year)
     val_mask   = train_year_mask & (edge_time >  cutoff_year)
@@ -117,7 +117,36 @@ def build_context_graph(data, collapse: bool = False):
     return context
 
 
-def run_epoch(model, loader, optimizer, device, train=True, edge_feat_cols=(0, 1)):
+def _build_edge_time_dict(batch, exclude_etype):
+    """Build edge_time_dict for RTE, covering all context edge types.
+
+    Edge types with no edge_time get zeros so the RTE validator
+    (which requires every edge type in edge_index_dict to be present)
+    doesn't raise.
+    """
+    result = {}
+    for et in batch.edge_types:
+        if et == exclude_etype:
+            continue
+        store = batch[et]
+        n = store.edge_index.size(1)
+        if hasattr(store, 'edge_time') and store.edge_time is not None:
+            result[et] = store.edge_time
+        else:
+            result[et] = torch.zeros(n, dtype=torch.long, device=store.edge_index.device)
+    return result if result else None
+
+
+def focal_loss(logits, labels, pos_weight=None, gamma=2.0):
+    """Binary focal loss with optional pos_weight for class imbalance."""
+    bce = F.binary_cross_entropy_with_logits(logits, labels, pos_weight=pos_weight, reduction="none")
+    probs = torch.sigmoid(logits)
+    p_t = probs * labels + (1 - probs) * (1 - labels)
+    loss = bce * (1 - p_t) ** gamma
+    return loss.mean()
+
+
+def run_epoch(model, loader, optimizer, device, train=True, edge_feat_cols=(0, 1), pos_weight=None, focal_gamma=None):
     model.train() if train else model.eval()
     total_loss, n_batches = 0.0, 0
 
@@ -125,12 +154,14 @@ def run_epoch(model, loader, optimizer, device, train=True, edge_feat_cols=(0, 1
     with ctx:
         for batch in loader:
             batch = batch.to(device)
+            edge_time_dict = _build_edge_time_dict(batch, ADV_ETYPE)
             out = model(
                 batch.x_dict,
                 batch.edge_index_dict,
                 batch[ADV_ETYPE].edge_label_index,
                 src_type="target",
                 dst_type="disease",
+                edge_time_dict=edge_time_dict,
                 edge_feat_dict={
                     et: batch[et].edge_attr[:, edge_feat_cols]
                     for et in batch.edge_types
@@ -140,7 +171,11 @@ def run_epoch(model, loader, optimizer, device, train=True, edge_feat_cols=(0, 1
             )
             labels = batch[ADV_ETYPE].edge_label.float()
             logits = out["logits_exist"].squeeze(-1)
-            loss = F.binary_cross_entropy_with_logits(logits, labels)
+            pw = pos_weight.to(device) if pos_weight is not None else None
+            if focal_gamma is not None:
+                loss = focal_loss(logits, labels, pos_weight=pw, gamma=focal_gamma)
+            else:
+                loss = F.binary_cross_entropy_with_logits(logits, labels, pos_weight=pw)
 
             if train:
                 optimizer.zero_grad()
@@ -174,7 +209,7 @@ def compute_metrics(labels: np.ndarray, scores: np.ndarray) -> dict:
             "precision", "recall", "f1", "mcc",
             "roc_auc", "average_precision", "brier", "balanced_mae", "log_loss",
             "precision@10", "precision@30", "precision@50",
-            "average_precision@10", "average_precision@30", "average_precision@50",
+            "average_precision@10", "average_precision@30", "average_precision@50", "average_precision@100",
             "recall@10", "recall@30", "recall@50",
             "rr@10", "rr@20", "rr@30", "rr@50", "rr@90", "rr@100",
         ]} | {"n_samples": n_samples, "n_positives": n_positives, "balance": balance}
@@ -245,9 +280,10 @@ def compute_metrics(labels: np.ndarray, scores: np.ndarray) -> dict:
         "precision@10":        _precision_at_k(10),
         "precision@30":        _precision_at_k(30),
         "precision@50":        _precision_at_k(50),
-        "average_precision@10": _ap_at_k(10),
-        "average_precision@30": _ap_at_k(30),
-        "average_precision@50": _ap_at_k(50),
+        "average_precision@10":  _ap_at_k(10),
+        "average_precision@30":  _ap_at_k(30),
+        "average_precision@50":  _ap_at_k(50),
+        "average_precision@100": _ap_at_k(100),
         "recall@10":           _recall_at_k(10),
         "recall@30":           _recall_at_k(30),
         "recall@50":           _recall_at_k(50),
@@ -262,18 +298,20 @@ def compute_metrics(labels: np.ndarray, scores: np.ndarray) -> dict:
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, edge_feat_cols=(0, 1)):
+def evaluate(model, loader, device, edge_feat_cols=(0, 1), pos_weight=None, focal_gamma=None):
     model.eval()
     all_logits, all_labels = [], []
 
     for batch in loader:
         batch = batch.to(device)
+        edge_time_dict = _build_edge_time_dict(batch, ADV_ETYPE)
         out = model(
             batch.x_dict,
             batch.edge_index_dict,
             batch[ADV_ETYPE].edge_label_index,
             src_type="target",
             dst_type="disease",
+            edge_time_dict=edge_time_dict,
             edge_feat_dict={
                 et: batch[et].edge_attr[:, edge_feat_cols]
                 for et in batch.edge_types
@@ -284,11 +322,27 @@ def evaluate(model, loader, device, edge_feat_cols=(0, 1)):
         all_logits.append(out["logits_exist"].squeeze(-1).cpu())
         all_labels.append(batch[ADV_ETYPE].edge_label.cpu())
 
-    logits = torch.cat(all_logits).numpy()
-    labels = (torch.cat(all_labels) > 0).numpy().astype(int)
+    logits_t = torch.cat(all_logits)
+    labels_t = torch.cat(all_labels).float()
+
+    pw = pos_weight.cpu() if pos_weight is not None else None
+    if focal_gamma is not None:
+        val_loss = focal_loss(logits_t, labels_t, pos_weight=pw, gamma=focal_gamma).item()
+    else:
+        val_loss = F.binary_cross_entropy_with_logits(logits_t, labels_t, pos_weight=pw).item()
+
+    logits = logits_t.numpy()
+    labels = (labels_t > 0).numpy().astype(int)
+    nan_mask = np.isnan(logits)
+    if nan_mask.any():
+        print(f"WARNING: {nan_mask.sum()} NaN logits detected, dropping them.")
+        logits = logits[~nan_mask]
+        labels = labels[~nan_mask]
     scores = expit(logits)
 
-    return compute_metrics(labels, scores)
+    metrics = compute_metrics(labels, scores)
+    metrics["val_loss"] = val_loss
+    return metrics
 
 
 @torch.no_grad()
@@ -309,10 +363,12 @@ def predict_test(model, context, edge_index, edge_labels, edge_times, num_neighb
     all_logits, all_labels = [], []
     for batch in loader:
         batch = batch.to(device)
+        edge_time_dict = _build_edge_time_dict(batch, ADV_ETYPE)
         out = model(
             batch.x_dict, batch.edge_index_dict,
             batch[ADV_ETYPE].edge_label_index,
             src_type="target", dst_type="disease",
+            edge_time_dict=edge_time_dict,
             edge_feat_dict={
                 et: batch[et].edge_attr[:, edge_feat_cols]
                 for et in batch.edge_types
@@ -330,6 +386,10 @@ def predict_test(model, context, edge_index, edge_labels, edge_times, num_neighb
 
 
 def main(cfg):
+    seed = cfg.get("seed", 42)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
     output_dir = Path(cfg.train.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     OmegaConf.save(cfg, output_dir / "config.yaml")
@@ -341,7 +401,6 @@ def main(cfg):
         project="advancement_hgt",
         name=cfg.experiment.name,
         config=OmegaConf.to_container(cfg, resolve=True),
-        mode="offline",
         dir=str(output_dir),
     )
 
@@ -359,7 +418,7 @@ def main(cfg):
 
     # ── Split advancement edges ──────────────────────────────────────────────
     train_mask, val_mask, test_mask, cutoff_year = split_advancement_edges(data)
-    print(f"Cutoff year (85th pct of train rows): {cutoff_year}")
+    print(f"  Cutoff year: {cutoff_year}")
     print(f"  Train edges: {train_mask.sum().item()}")
     print(f"  Val   edges: {val_mask.sum().item()}")
     print(f"  Test  edges: {test_mask.sum().item()}")
@@ -367,6 +426,17 @@ def main(cfg):
     edge_index = data[ADV_ETYPE].edge_index  # [2, E]
     edge_attr  = data[ADV_ETYPE].edge_attr   # [E, 1]
     edge_time  = data[ADV_ETYPE].edge_time   # [E]
+
+    # ── Class imbalance weight ───────────────────────────────────────────────
+    train_labels_all = edge_attr[train_mask, 0]
+    n_pos = train_labels_all.sum().item()
+    n_neg = len(train_labels_all) - n_pos
+    if cfg.train.get("use_pos_weight", True):
+        pos_weight = torch.tensor([n_neg / max(n_pos, 1)], dtype=torch.float32)
+        print(f"pos_weight: {pos_weight.item():.2f}  (n_pos={int(n_pos)}, n_neg={int(n_neg)})")
+    else:
+        pos_weight = None
+        print(f"pos_weight: disabled  (n_pos={int(n_pos)}, n_neg={int(n_neg)})")
 
     # ── Build static context graph (no advancement edges) ───────────────────
     print("Building context graph...")
@@ -385,14 +455,19 @@ def main(cfg):
         use_edge_features=cfg.model.get("use_edge_features", False),
         edge_feat_dim=cfg.model.get("edge_feat_dim", 2),
     ).to(device)
-    print(f"Model: {cfg.model.name} | params: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"Model: {cfg.model.name}")
 
     # Column indices into edge_attr [E, 2] = [score, novelty]
     # e.g. [0] = score only, [1] = novelty only, [0,1] = both
     _edge_feat_cols = list(cfg.model.get("edge_feat_cols", [0, 1]))
 
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=cfg.train.num_epochs,
+        eta_min=cfg.train.get("eta_min", 1e-6),
     )
 
     num_neighbors = list(cfg.train.num_neighbors)
@@ -420,80 +495,78 @@ def main(cfg):
         shuffle=False,
     )
 
-    # ── Training loop ────────────────────────────────────────────────────────
-    best_val_rr90  = -1.0
-    best_val_metrics = {}
-    patience_counter = 0
-    patience = cfg.train.early_stopping.patience if cfg.train.early_stopping.enabled else int(1e9)
-
-    metric_cols = [
-        "epoch", "split", "train_loss",
-        "n_samples", "n_positives", "balance",
-        "precision", "recall", "f1", "mcc",
-        "roc_auc", "average_precision", "brier", "balanced_mae", "log_loss",
-        "precision@10", "precision@30", "precision@50",
-        "average_precision@10", "average_precision@30", "average_precision@50",
-        "recall@10", "recall@30", "recall@50",
-        "rr@10", "rr@20", "rr@30", "rr@50", "rr@90", "rr@100",
-    ]
+    # ── Training loop with val-set early stopping ────────────────────────────
     epoch_rows = []
+    ckpt_path = output_dir / "best_model.pt"
+    es_cfg = cfg.train.get("early_stopping", {})
+    es_enabled = bool(es_cfg.get("enabled", True))
+    patience = int(es_cfg.get("patience", 10)) if es_enabled else int(1e9)
+
+    best_val_rr  = -1.0
+    best_epoch   = 0
+    patience_ctr = 0
 
     for epoch in range(1, cfg.train.num_epochs + 1):
-        train_loss  = run_epoch(model, train_loader, optimizer, device, train=True, edge_feat_cols=_edge_feat_cols)
-        val_metrics = evaluate(model, val_loader, device, edge_feat_cols=_edge_feat_cols)
+        train_loss = run_epoch(model, train_loader, optimizer, device, train=True, edge_feat_cols=_edge_feat_cols, pos_weight=pos_weight, focal_gamma=cfg.train.get("focal_gamma", None))
+        scheduler.step()
 
-        row = {"epoch": epoch, "split": "val", "train_loss": train_loss}
-        row.update(val_metrics)
+        val_metrics = evaluate(model, val_loader, device, edge_feat_cols=_edge_feat_cols, pos_weight=pos_weight, focal_gamma=cfg.train.get("focal_gamma", None))
+        val_rr = val_metrics["rr@100"]
+        if np.isnan(val_rr):
+            val_rr = -1.0
+
+        row = {"epoch": epoch, "train_loss": train_loss}
+        row.update({f"val_{k}": float(v) for k, v in val_metrics.items()})
         epoch_rows.append(row)
 
-        wandb.log({"train/loss": train_loss} |
-                  {f"val/{k}": v for k, v in val_metrics.items()},
-                  step=epoch)
-
+        wandb.log(
+            {"train/loss": train_loss}
+            | {f"val/{k}": v for k, v in val_metrics.items()},
+            step=epoch,
+        )
         print(
-            f"Epoch {epoch:3d} | loss: {train_loss:.4f} "
-            f"| roc_auc: {val_metrics['roc_auc']:.4f} "
+            f"Epoch {epoch:3d} | train_loss: {train_loss:.4f} "
+            f"| val roc_auc: {val_metrics['roc_auc']:.4f} "
             f"| ap: {val_metrics['average_precision']:.4f} "
-            f"| f1: {val_metrics['f1']:.4f} "
-            f"| p@10: {val_metrics['precision@10']:.4f} "
-            f"| r@50: {val_metrics['recall@50']:.4f} "
-            f"| rr@90: {val_metrics['rr@90']:.4f}"
+            f"| rr@100: {val_rr:.4f}"
         )
 
-        if val_metrics["rr@90"] > best_val_rr90:
-            best_val_rr90   = val_metrics["rr@90"]
-            best_val_metrics = val_metrics
-            patience_counter = 0
-            torch.save(model.state_dict(), output_dir / "best_model.pt")
-            print(f"  ✓ Best model saved (rr@90={best_val_rr90:.4f})")
+        if val_rr > best_val_rr:
+            best_val_rr  = val_rr
+            best_epoch   = epoch
+            patience_ctr = 0
+            torch.save(model.state_dict(), ckpt_path)
         else:
-            patience_counter += 1
-            if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch} (patience={patience})")
+            patience_ctr += 1
+            if patience_ctr >= patience:
+                print(f"Early stopping at epoch {epoch} (best epoch {best_epoch})")
                 break
 
+    print(f"Best epoch: {best_epoch} | best val rr@100: {best_val_rr:.4f}")
+    print(f"Loading best checkpoint from {ckpt_path}")
+    model.load_state_dict(torch.load(ckpt_path, map_location=device))
+
     # Save per-epoch metrics
-    epoch_df = pd.DataFrame(epoch_rows, columns=[c for c in metric_cols if c in epoch_rows[0]])
+    epoch_df = pd.DataFrame(epoch_rows)
     epoch_df.to_csv(output_dir / "epoch_metrics.csv", index=False)
     print(f"Epoch metrics saved to {output_dir / 'epoch_metrics.csv'}")
 
-    # ── Test prediction ───────────────────────────────────────────────────────
-    print("\nLoading best model for test evaluation...")
-    model.load_state_dict(torch.load(output_dir / "best_model.pt", weights_only=True))
-
+    # ── Test prediction with best-val checkpoint ─────────────────────────────
     test_edge_index = edge_index[:, test_mask]
+    test_edge_labels = edge_attr[test_mask, 0]
+    test_edge_times  = edge_time[test_mask]
     test_scores, test_labels = predict_test(
         model, context,
         edge_index=test_edge_index,
-        edge_labels=edge_attr[test_mask, 0],
-        edge_times=edge_time[test_mask],
+        edge_labels=test_edge_labels,
+        edge_times=test_edge_times,
         num_neighbors=num_neighbors,
         batch_size=cfg.train.batch_size,
         device=device,
         edge_feat_cols=_edge_feat_cols,
     )
-
     test_metrics = compute_metrics(test_labels, test_scores)
+    wandb.log({f"test/{k}": v for k, v in test_metrics.items()})
     print(
         f"\nTest | roc_auc: {test_metrics['roc_auc']:.4f} "
         f"| ap: {test_metrics['average_precision']:.4f} "
@@ -504,17 +577,16 @@ def main(cfg):
 
     # ── Save results ──────────────────────────────────────────────────────────
     results = {
-        "cutoff_year": int(cutoff_year),
         "train_edges": int(train_mask.sum().item()),
         "val_edges":   int(val_mask.sum().item()),
         "test_edges":  int(test_mask.sum().item()),
-        "val":  {f"val_{k}":  float(v) for k, v in best_val_metrics.items()},
+        "best_epoch":  int(best_epoch),
+        "best_val_rr@100": float(best_val_rr),
         "test": {f"test_{k}": float(v) for k, v in test_metrics.items()},
     }
     OmegaConf.save(OmegaConf.create(results), output_dir / "results.yaml")
     print(f"Results saved to {output_dir / 'results.yaml'}")
 
-    wandb.log({f"test/{k}": v for k, v in test_metrics.items()})
     wandb.finish()
 
     # ── Save test predictions parquet ─────────────────────────────────────────
