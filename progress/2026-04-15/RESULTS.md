@@ -2,16 +2,20 @@
 
 Benchmark of scoring methods on the clinical-advancement prediction task, evaluated on held-out test pairs. The headline comparison is **P3_LAMBDARAN (proposed)** vs. **RDG (time-agnostic baseline)**. OTS is included as an association-score baseline.
 
-> **Note on RDG-T.** The time-aware relational distance baseline (`rdg__all__positive`) appears in the plots and tables but should be disregarded as a comparator: it leaks future information into its scores, so its apparent lead is not a fair reference. The discussion below focuses on RDG vs. P3_LAMBDARAN.
+> **Note on RDG-T.** RDG-T (`rdg__all__positive`) is RDG fit with all features including `target_disease__time__transition` — the time since a target–disease pair first entered Phase 2 trials. This feature directly encodes the label, so RDG-T leaks future information and its apparent lead is not a fair comparison. The discussion below focuses on RDG vs. P3_LAMBDARAN.
+>
+> Czech et al. (2024) on RDG-T:
+> *"The third ranking method presented in Figure 2, 'RDG-T', differs from the RDG model only in that it uses time since the phase 2 transition as a predictive factor in addition to all others. We observe that the use of this information greatly improves standard performance metrics like receiver operating characteristic (ROC) and average precision (AP), however it adds little to no value in rankings beyond a level where substantial relative risk increases can be observed. In other words, it constitutes an effective but coarse mechanism for ranking TD pairs while lacking the high precision of other factors like genetic support. […] we refrain from focusing on RDG-T, or the similar GBM-T model, because neither is readily applicable to undeveloped TD pairs for which the time since phase 2 transition is not available. They do, however, present a useful performance ceiling towards which future work might build."*
+> — Czech et al., medRxiv 2024 (doi: 10.1101/2024.08.02.24311422)
 
 ## Models compared
 
 | Slug | Description |
 | --- | --- |
 | `OTS` | OpenTargets global association score (`ots__all`). Association baseline. |
-| `RDG` | Time-agnostic relational distance / graph baseline (`rdg__no_time__positive`). **Primary reference.** |
+| `RDG` | Constrained, L2-regularized linear regressor (Ridge regressor) fit with all core features — all features except time since Phase 2 transition (`rdg__no_time__positive`). **Primary reference.** |
 | `P3_LAMBDARAN` | Proposed EA-HGT trained with LambdaRank loss (`p3_lambdarank`). **Proposed model.** |
-| ~~`RDG-T`~~ | Time-aware RDG — *excluded from conclusions* due to label leakage. |
+| ~~`RDG-T`~~ | RDG with all features including `target_disease__time__transition` (time since Phase 2 entry for the T–D pair) — *excluded from conclusions* as this feature directly encodes the label. |
 
 Strata:
 - **Novelty**: `pioneer` (no prior T–D link) vs. `known`.
@@ -20,7 +24,7 @@ Strata:
 
 ## Overall classification performance
 
-![Overall metrics](external_plots/classification_metrics_overall.png)
+![Overall metrics](result_plots/classification_metrics_overall.png)
 
 | Model | ROC-AUC | Average precision |
 | --- | --- | --- |
@@ -32,7 +36,13 @@ P3_LAMBDARAN and RDG are roughly matched on global threshold-free metrics (P3 sl
 
 ## Precision at top-N (relative risk vs. base rate)
 
-![Relative risk by limit](external_plots/relative_risk_by_limit.png)
+**Relative risk at N (RR@N)** is the primary evaluation metric in Czech et al. It measures how much more frequently positive outcomes (Phase 2 → Phase 3 advancement) appear in the top-N ranked target–disease pairs compared to the base rate across all pairs:
+
+$$\text{RR@N} = \frac{\text{positive rate among top-}N}{\text{positive rate among remaining pairs}}$$
+
+A value of 1.0 means no enrichment; higher is better. This metric is preferred over AUC/AP for this task because it directly quantifies actionable prioritisation value — a model that concentrates true advancements at the top of the list is what matters for drug discovery triage, regardless of overall discrimination. Czech et al. report RR at N = 10, 20, 30, …, 100 (computed as a mean over primary therapeutic areas).
+
+![Relative risk by limit](result_plots/relative_risk_by_limit.png)
 
 Comparing P3_LAMBDARAN to RDG across top-N cutoffs:
 
@@ -53,20 +63,20 @@ Comparing P3_LAMBDARAN to RDG across top-N cutoffs:
 
 ## Relative risk by stratum
 
-![RR by limit and stratum](external_plots/relative_risk_by_limit_by_stratum.png)
+![RR by limit and stratum](result_plots/relative_risk_by_limit_by_stratum.png)
 
 P3 vs. RDG by stratum (ignoring RDG-T):
-- **`evidence_free` / `known__evidence_free`**: P3 roughly doubles RDG's RR at small N (e.g. RR@10 ≈ 2.64 vs. 0.22 on `evidence_free`; 4.21 vs. 0.34 on `known__evidence_free`). RDG has almost no signal where there is no prior evidence, while P3 does.
-- **`known__literature_only`**: P3 dominates — RR@30 ≈ 6.89 (vs. RDG 1.64), RR@90 ≈ 6.52 (vs. RDG 1.12). The biggest P3-over-RDG gap.
-- **`literature_only`**: P3 consistently 2–3× RDG across N.
-- **`pioneer`**: noisy due to small support, but P3 shows strong enrichment at specific cutoffs (RR@60 ≈ 13.6).
-- **`direct_evidence`**: the two models are close; this stratum is already easy because direct evidence is a strong signal on its own.
+- **No prior target–disease evidence**: P3 dominates — RR@10 = 2.64 vs. 0.22 for RDG. RDG has almost no signal here while P3 does, likely because graph structure provides signal even without direct evidence links.
+- **Prior text-mining evidence only**: P3 consistently 2–3× RDG across all cutoffs (RR@10 = 3.91 vs. 1.98; RR@90 = 3.27 vs. 1.18). The biggest sustained advantage.
+- **Target entering Phase 2 for the first time across any disease**: Noisy due to small support (NaN at N=90 for P3). P3 shows strong enrichment at specific cutoffs (RR@60 = 13.60 vs. 1.17) but is unreliable at the extremes.
+- **Target has reached Phase 2 in another disease context**: Both models perform well; P3 modestly ahead (RR@10 = 3.96 vs. 3.63, RR@90 = 2.69 vs. 1.67).
+- **Prior experimental evidence**: Models are close at small N (RR@10 = 5.14 vs. 4.28) but P3 loses its edge at mid-range cutoffs (RR@60 = 0.64 vs. 2.12). Direct evidence is a strong enough signal that the graph adds little beyond what RDG captures.
 
 ## Per-therapeutic-area performance
 
-![Per-TA box plots](external_plots/classification_metrics_by_ta.png)
+![Per-TA box plots](result_plots/classification_metrics_by_ta.png)
 
-![RR delta vs RDG](external_plots/relative_risk_delta_vs_rdg.png)
+![RR delta vs RDG](result_plots/relative_risk_delta_vs_rdg.png)
 
 The delta heatmap (P3 minus RDG) is the direct per-TA view of the proposed-vs-baseline question:
 
@@ -80,17 +90,7 @@ The delta heatmap (P3 minus RDG) is the direct per-TA view of the proposed-vs-ba
   
   P3 is significantly better than RDG at deeper cutoffs; at N=10 the advantage is directionally consistent but not significant due to per-TA variance.
 
-![RR distributions across TAs](external_plots/rr_distributions_ta.png)
-
-## Risk matrix — P3_LAMBDARAN across novelty × evidence
-
-![Risk matrix](external_plots/risk_matrix_heatmap.png)
-
-P3_LAMBDARAN ROC-AUC by cell:
-- **pioneer × evidence_free** (n=120): **AUC = 0.693** — the model discriminates future advancements even with no prior evidence or prior T–D link, which is exactly where RDG has no signal (RR ≈ 0 at small N).
-- **pioneer × literature_only** (n=59): AUC = 0.676.
-- **pioneer × direct_evidence** (n=33): AUC = 0.522 — near chance, but the sample is small and direct evidence already saturates ranking.
-- **known × {evidence_free, literature_only, direct_evidence}**: AUC 0.605–0.652 across the bulk (n ≈ 8.7k).
+![RR distributions across TAs](result_plots/rr_distributions_ta.png)
 
 ## Summary — P3_LAMBDARAN vs. RDG
 
@@ -99,12 +99,12 @@ P3_LAMBDARAN ROC-AUC by cell:
 3. **Per-TA**, P3 dominates RDG at N=10 in nearly all areas and is significantly better across TAs at N=50 and N=100 (Wilcoxon p < 0.05).
 4. **Where P3 does not help over RDG**: `direct_evidence` pairs (evidence itself saturates ranking) and a handful of TAs at deep cutoffs.
 
-## Source files
+## TODO
 
-- Classification metrics: [classification_metrics.csv](classification_metrics.csv)
-- RR by top-N / stratum: [relative_risk_by_limit.csv](relative_risk_by_limit.csv)
-- RR per therapeutic area: [relative_risk_by_ta.csv](relative_risk_by_ta.csv)
-- Test-pair strata: [test_pair_strata.csv](test_pair_strata.csv)
-- Scored predictions: [predictions.csv](predictions.csv)
-- Plots: [external_plots/](external_plots/)
-- Cumulative advancement by TA (context): [cumulative_advancement_by_ta.csv](advancement_cumulative_output/cumulative_advancement_by_ta.csv)
+- **Update to OpenTargets 25.06** — all data, graph, and RDG comparison scores are currently anchored at the 23.06 release. Re-run the full pipeline (edge collection → graph construction → node features → training → evaluation) against the latest 25.06 snapshot to ensure results reflect current biology coverage and evidence.
+
+- **Temporal GNN methods** — explore architectures designed for temporal graphs (e.g. TGN, CAWN, GraphMixer) as alternatives or complements to the static EA-HGT. These methods process edge timestamps natively rather than encoding recency as a feature, which may better capture the sequential nature of clinical evidence accumulation.
+
+- **Ablation study** — systematically remove components of EA-HGT to isolate their contributions: edge attributes (score, novelty), RTE (relational time encoding), LambdaRank loss vs. BCE, and graph heterogeneity. Compare against the existing b1–b5 and p1–p3 baselines.
+
+- **Hypothesis: transition-year-relative advancement edges** — currently all advancement edges are treated uniformly regardless of when the Phase 1→2 transition occurred. The hypothesis is that edges from more recent years carry different predictive signal than older ones — a target that entered Phase 2 last year is more likely to advance than one that entered a decade ago and stalled. This could be modelled by weighting or filtering advancement edges by their recency relative to the decision year, or by adding a transition-age feature to the edge attributes.
