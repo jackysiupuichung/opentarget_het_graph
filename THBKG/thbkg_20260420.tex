@@ -176,7 +176,7 @@ evidence-sparse pairs that direct-edge models cannot score. Under
 decision-aligned evaluation, \eahgt{} achieves RR@10 $\approx$ 6.02
 versus 4.10 for the Czech et al.\ ridge regression baseline, and
 RR@100 $\approx$ 4.82 versus 1.68, with the advantage concentrated in
-the evidence-free and literature-only strata and confirmed across 13
+the no-evidence and text-mining-only strata and confirmed across 13
 therapeutic areas.
 
 \item A \textbf{systematic ablation} over encoder families
@@ -957,46 +957,49 @@ the set used in Czech et al.'s primary performance figures.
 \label{sec:strata}
 
 To localise where the graph-based model gains over the direct-edge
-baseline, every evaluation pair $(v_t, v_d)$ is assigned to a stratum
-along two orthogonal axes, both defined using only evidence dated
-before the pair's Phase~II entry year $y$ (i.e.\ respecting the same
-decision-aligned cutoff used for features).
+baseline, every evaluation pair $(v_t, v_d)$ is labelled along two
+orthogonal axes, both defined using only evidence dated before the
+pair's Phase~II entry year $y$ (i.e.\ respecting the same
+decision-aligned cutoff used for features). The stratum names below
+are the panel labels used in the stratified figures
+(Figures~\ref{fig:rr_by_stratum} and~\ref{fig:classification_by_stratum_ta}).
 
-\emph{Evidence axis} (three levels), based on which target--disease
-edge types exist with snapshot year $< y$:
+\emph{Evidence availability} (three levels), based on which
+target--disease edge types exist with snapshot year $< y$:
 \begin{itemize}
-\item \textit{direct\_evidence} --- at least one edge of a
+\item \textit{Prior experimental evidence} --- at least one edge of a
 \emph{direct} target--disease relation, taken to be
 \texttt{genetic\_association}, \texttt{somatic\_mutation},
 \texttt{affected\_pathway}, \texttt{animal\_model}, or
 \texttt{rna\_expression}; static (untimestamped) genetic edges count
 as always present;
-\item \textit{literature\_only} --- no direct edge, but at least one
-\texttt{literature} (text-mined co-occurrence) edge;
-\item \textit{evidence\_free} --- neither; no direct target--disease
-evidence of any kind at the decision point. This is the majority class
-(75.4\% of Phase~II pairs) and the regime in which a direct-edge model
-receives an all-zero feature vector.
+\item \textit{Prior text-mining evidence only} --- no direct edge, but
+at least one \texttt{literature} (text-mined co-occurrence) edge;
+\item \textit{No prior target--disease evidence} --- neither; no
+direct target--disease evidence of any kind at the decision point.
+This is the majority class (75.4\% of Phase~II pairs) and the regime
+in which a direct-edge model receives an all-zero feature vector.
 \end{itemize}
 
-\emph{Novelty axis} (two levels), based on the target's prior clinical
-history:
+\emph{Target clinical history} (two levels):
 \begin{itemize}
-\item \textit{pioneer} --- the target had not entered Phase~II for any
-\emph{other} disease in an earlier year; this is the target's first
-appearance in the clinical record;
-\item \textit{known} --- the target has previously reached Phase~II in
-at least one other disease context, so partial clinical precedent
-exists even when direct evidence for this specific indication does not.
+\item \textit{Target entering Phase~II for the first time across any
+disease} --- the target had not entered Phase~II for any \emph{other}
+disease in an earlier year; this is the target's first appearance in
+the clinical record;
+\item \textit{Target has reached Phase~II in another disease context}
+--- the target has previously reached Phase~II in at least one other
+indication, so partial clinical precedent exists even when direct
+evidence for this specific indication does not.
 \end{itemize}
 
-The two axes are crossed to give six strata
-(\{pioneer, known\} $\times$ \{direct\_evidence, literature\_only,
-evidence\_free\}); stratified RR@$N$ and classification metrics are
-reported per stratum (and per stratum $\times$ therapeutic area) so
-that the location of the \eahgt{} advantage --- concentrated in the
-\textit{evidence\_free} and \textit{literature\_only} cells, and in
-particular for \textit{pioneer} targets --- can be read directly.
+The two axes are crossed to give six strata; stratified RR@$N$ and
+classification metrics are reported per stratum (and per stratum
+$\times$ therapeutic area), alongside the pooled ``all test pairs''
+result. The \eahgt{} advantage is concentrated in the
+\emph{No prior target--disease evidence} and \emph{Prior text-mining
+evidence only} strata, and in particular for targets entering
+Phase~II for the first time.
 
 \subsubsection{Metrics.}
 \label{sec:metrics}
@@ -1270,49 +1273,53 @@ edge features) has the highest median average precision.}
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{figures/results/relative_risk_by_limit_by_stratum.png}
-\caption{Relative risk by top-$N$ cutoff within each evidence /
-novelty stratum (Section~\ref{sec:strata}), for all seven experimental
-conditions of Table~\ref{tab:conditions} plus RDG and OTS. Top row:
-the three evidence-axis strata; bottom row: the two novelty-axis
-strata. Stratum $\times$ therapeutic-area breakdowns of the
-classification metrics are reported in Supplementary
-Figure~\ref{fig:classification_by_stratum_ta}.}
+\caption{Relative risk by top-$N$ cutoff within each stratum
+(Section~\ref{sec:strata}), for all seven experimental conditions of
+Table~\ref{tab:conditions} plus RDG and OTS. Top row: all test pairs,
+and the two target-clinical-history strata (entering Phase~II for the
+first time / has reached Phase~II in another disease context). Bottom
+row: the three evidence-availability strata (no prior target--disease
+evidence / prior text-mining evidence only / prior experimental
+evidence). Panel sub-titles give the per-stratum pair count. Stratum
+$\times$ therapeutic-area breakdowns of the classification metrics are
+reported in Supplementary Figure~\ref{fig:classification_by_stratum_ta}.}
 \label{fig:rr_by_stratum}
 \end{figure*}
 
 The advantage of \eahgt{} over RDG is not uniform across strata but is
 concentrated precisely where direct-edge models lack signal
 (Figure~\ref{fig:rr_by_stratum}; strata defined in
-Section~\ref{sec:strata}). Among pairs with no prior
-target--disease evidence of any type at the decision point
-(\textit{evidence\_free}), \eahgt{} achieves RR@10 $\approx$ 2.6 while
-RDG is near 0.2, essentially no signal. The heterogeneous graph
-structure, which encodes multi-hop biological relationships, provides
-ranking signal in the complete absence of the direct target--disease links
-that RDG relies on. Among pairs supported only by literature
-co-occurrence (\textit{literature\_only}), \eahgt{} is 2--3$\times$ RDG
+Section~\ref{sec:strata}). Among pairs with \emph{no prior
+target--disease evidence} at the decision point, \eahgt{} achieves
+RR@10 $\approx$ 2.6 while RDG is near 0.2 --- essentially no signal.
+The heterogeneous graph structure, which encodes multi-hop biological
+relationships, provides ranking signal in the complete absence of the
+direct target--disease links that RDG relies on. Among pairs with
+\emph{prior text-mining evidence only}, \eahgt{} is 2--3$\times$ RDG
 across the full $N$ range: text-mining evidence exists but is weak, and
-graph topology augments it substantially. For \textit{pioneer} targets
-(first Phase~II entry across any disease), \eahgt{} shows bursts of high
-enrichment at specific cutoffs but the curves are noisy --- the small
-number of pioneer test pairs limits statistical reliability per stratum.
+graph topology augments it substantially. For \emph{targets entering
+Phase~II for the first time across any disease}, \eahgt{} shows bursts
+of high enrichment at specific cutoffs but the curves are noisy --- the
+small number of such pairs (212 in the test set) limits statistical
+reliability per stratum.
 
-Conversely, for pairs with prior experimental evidence
-(\textit{direct\_evidence}), the gap narrows sharply. Both models rank
-well at small $N$, but the direct evidence features are dominant, leaving
-little room for graph-derived signal to add value. For \textit{known}
-targets (prior Phase~II in another disease context), both models perform
-well and the curves track more closely, with \eahgt{} maintaining a
-modest consistent advantage.
+Conversely, for pairs with \emph{prior experimental evidence}, the gap
+narrows sharply. Both models rank well at small $N$, but the direct
+evidence features are dominant, leaving little room for graph-derived
+signal to add value. For \emph{targets that have reached Phase~II in
+another disease context}, both models perform well and the curves track
+more closely, with \eahgt{} maintaining a modest consistent advantage.
 
-A stratified view of classification metrics by both evidence stratum and
+A stratified view of classification metrics by both stratum and
 therapeutic area (Supplementary Figure~\ref{fig:classification_by_stratum_ta})
-confirms that the \eahgt{} advantage on average precision is most pronounced
-in the \textit{evidence\_free} and \textit{literature\_only} strata,
-particularly for pioneer targets, cases where RDG has minimal signal and
-the graph must fill the gap. The \textit{known} $\times$
-\textit{direct\_evidence} intersection is the easiest subpopulation for all
-models; \textit{pioneer} $\times$ \textit{evidence\_free} is the hardest.
+confirms that the \eahgt{} advantage on average precision is most
+pronounced in the \emph{no prior target--disease evidence} and
+\emph{prior text-mining evidence only} strata, particularly for targets
+entering Phase~II for the first time --- cases where RDG has minimal
+signal and the graph must fill the gap. Targets with prior Phase~II
+history and prior experimental evidence are the easiest subpopulation
+for all models; first-time-in-Phase~II targets with no prior evidence
+are the hardest.
 
 \subsubsection{Per-therapeutic-area analysis.}
 
@@ -1448,8 +1455,9 @@ constant.
 
 The main finding is that \eahgt{}'s advantage over the direct-edge RDG
 baseline is concentrated in the strata where feature-based models have
-no signal. Among \textit{evidence\_free} pairs (75.4\% of Phase~II
-target--disease pairs), RDG achieves RR@10 $\approx$ 0.22, meaning its
+no signal. Among pairs with \emph{no prior target--disease evidence}
+(75.4\% of Phase~II target--disease pairs), RDG achieves RR@10
+$\approx$ 0.22, meaning its
 ranking is effectively anti-correlated with advancement. \eahgt{}
 achieves RR@10 $\approx$ 2.64 on the same pairs. The reason is simple:
 RDG receives a zero-valued feature vector for these pairs and cannot
@@ -1470,9 +1478,9 @@ recovers signal. Importantly, the recovered signal is not just non-zero
 scores for previously unscored pairs. It is \emph{advancement-predictive},
 discriminating between pairs that will and will not advance.
 
-The second-largest stratum-level advantage appears in the
-\textit{literature\_only} regime, where \eahgt{} delivers 2--3$\times$
-the enrichment of RDG. Literature co-occurrence reflects accumulated
+The second-largest stratum-level advantage appears among pairs with
+\emph{prior text-mining evidence only}, where \eahgt{} delivers
+2--3$\times$ the enrichment of RDG. Literature co-occurrence reflects accumulated
 research attention rather than mechanistic validity. It dominates among
 pairs with any direct evidence (12.5--22.8\% depending on the therapeutic
 area) but provides weak discrimination for advancement. The graph encoder
@@ -1480,9 +1488,10 @@ supplements this weak signal with structural context from the broader
 neighbourhood, allowing finer-grained ranking among pairs whose literature
 scores are similar.
 
-For \textit{direct\_evidence} pairs, the advantage of \eahgt{} diminishes.
-RDG achieves competitive enrichment at small $N$ and outperforms \eahgt{}
-at mid-range cutoffs. This is expected: when genetic associations, animal
+For pairs with \emph{prior experimental evidence}, the advantage of
+\eahgt{} diminishes. RDG achieves competitive enrichment at small $N$
+and outperforms \eahgt{} at mid-range cutoffs. This is expected: when
+genetic associations, animal
 model data, or pathway perturbation results are available, they provide a
 strong direct signal of mechanistic relevance, and the graph neighbourhood
 adds less. Overall, \eahgt{} outperforms direct-edge models across all
@@ -1498,6 +1507,68 @@ advantages at deep cutoffs (respiratory, urinary) tend to have smaller
 evaluation sets and sparser graph neighbourhoods, suggesting that the
 benefit of multi-hop propagation depends on the structural richness of
 the local graph.
+
+
+\subsection{The Temporal Shift in Evidence Accumulation}
+\label{sec:discussion_temporal_shift}
+
+The reason three quarters of Phase~II pairs are evidence-sparse at
+their decision point is not that the underlying biology was unknown ---
+it is that the \emph{record} of that biology arrives late, and along
+two distinct timelines that the THBKG makes visible.
+
+\textbf{A database timeline.} An evidence type appears in Open Targets
+not when the relevant experiments are done but when a curation effort
+or a data integration is completed, and these milestones are spread
+across two decades. The cumulative chord diagrams
+(Figure~\ref{fig:thbkg_chord}) show this directly: animal-model
+phenotype edges dominate the earliest snapshot ($\leq$2005, $\approx$
+64\% of edges), reflecting early systematic curation of model-organism
+phenotypes; somatic-mutation and clinical-precedence edges accumulate
+through $\leq$2010 as cancer-genomics resources and ChEMBL mature;
+RNA-expression and protein-interaction edges arrive substantially
+later, around $\leq$2015, following expanded integration of expression
+atlases and interaction databases. This is curation maturity, not
+biological importance --- and it is consistent with the inflection-year
+analysis of \citet{Falaguera2025TemporalDiscovery}. A model that scores a
+2010-decision pair on the post-2015 graph is therefore not just leaking
+labels; it is crediting the pair with evidence types that, as of the
+decision, no public resource had yet ingested. Per-instance temporal
+masking is what removes this, and it is also what manufactures the
+evidence-sparse regime: the same masking that makes the evaluation
+honest is the reason most pairs have empty direct-evidence vectors.
+
+\textbf{A research-attention timeline.} The literature edge type has
+its own, different temporal pathology. Text-mined co-occurrence
+accumulates steadily across every snapshot, but that volume is
+concentrated on a small set of already-validated targets and does not
+track the discovery of novel target--disease relationships ---
+publication and curation effort follow prior attention, so the genes
+that already have evidence get more of it, while genuinely novel
+hypotheses remain thinly documented for years
+\citep{Falaguera2025TemporalDiscovery}. This is the ``streetlight'' regime:
+high literature edge counts encode where the field has been looking, not
+where the mechanistic signal is. It is why the \emph{prior text-mining
+evidence only} stratum is a hard case for a feature-based model --- the
+literature score exists but is weakly discriminative --- and why the
+graph encoder helps there: structural context from the broader
+neighbourhood (pathway membership, interaction partners, co-targeted
+molecules) supplies signal that the volume-driven literature feature
+lacks.
+
+The two timelines compound. A pair can be evidence-sparse because the
+curation record has not caught up to the experiments (database lag), or
+because the relevant biology has simply not attracted enough study to
+generate any evidence at all (attention lag), or both. A direct-edge
+model cannot distinguish these states from a pair that is genuinely
+unsupported; the THBKG can, because the multi-hop neighbourhood of a
+curation-lagged pair is structurally rich --- its target sits in
+well-characterised pathways and interaction modules --- whereas the
+neighbourhood of an attention-lagged or genuinely-unsupported pair is
+not. The graph-based advantage in the sparse strata is, in this sense,
+a direct consequence of the temporal shift: it recovers exactly the
+signal that the late-arriving, attention-biased evidence record fails
+to encode at the decision point.
 
 
 \subsection{Clinical Portfolio Optimisation}
@@ -1615,7 +1686,7 @@ model reaches RR@10 $\approx$ 6.0 and RR@100 $\approx$ 4.8 ---
 roughly $1.5\times$ the top-of-list enrichment of the Czech et al.\
 ridge-regression baseline at $N = 10$ and $\approx 2.9\times$ at $N =
 100$ --- with the advantage concentrated precisely in the
-evidence-free and literature-only strata where direct-edge models have
+no-evidence and text-mining-only strata where direct-edge models have
 no signal, and confirmed across 13 therapeutic areas. A systematic
 ablation over encoder families (\hgt{}, \rgcn{}, \compgcn{}, \gatv{})
 and edge-feature subsets attributes the gain to the multiplicative
@@ -1708,11 +1779,12 @@ in every panel.}
 \centering
 \includegraphics[width=0.8\textwidth]{figures/results/classification_metrics_by_stratum_by_ta.png}
 \caption{Classification metrics (average precision and AUROC)
-stratified by both evidence stratum (pioneer/known, evidence density)
-and therapeutic area, for all seven experimental conditions of
+stratified by both stratum (Section~\ref{sec:strata}) and therapeutic
+area, for all seven experimental conditions of
 Table~\ref{tab:conditions} plus RDG and OTS. The P3 (\eahgt{})
-advantage on AP is most pronounced in the \textit{evidence\_free} and
-\textit{literature\_only} strata for pioneer targets.}
+advantage on AP is most pronounced in the \emph{no prior
+target--disease evidence} and \emph{prior text-mining evidence only}
+strata, for targets entering Phase~II for the first time.}
 \label{fig:classification_by_stratum_ta}
 \end{figure}
 
