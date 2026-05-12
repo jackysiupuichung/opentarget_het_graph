@@ -736,7 +736,8 @@ def evaluate(
     _pct1  = max(1, round(_n_pairs_total * 0.01))
     _pct2  = max(1, round(_n_pairs_total * 0.02))
     _max_limit_plot = 250
-    _eahgt_slug = model_display.get("p3_lambdarank_undirected", model_display.get("p3_lambdarank_directed", "EAHGT"))
+    _eahgt_slug = "EAHGT" if "EAHGT" in set(rr_mor["model_slug"]) else model_display.get(
+        "p3_lambdarank_undirected", model_display.get("p3_lambdarank_directed", "EAHGT"))
     _rr_mor_katz = rr_mor[rr_mor["model_slug"] == _eahgt_slug].copy()
     _rr_pooled_katz = rr_pooled[rr_pooled["model_slug"] == _eahgt_slug].copy()
     _rr_plot_max = min(6.0, float(_rr_pooled_katz["relative_risk_high"].max()))
@@ -746,7 +747,17 @@ def evaluate(
         + pn.geom_ribbon(
             data=_rr_pooled_katz,
             mapping=pn.aes(x="limit", ymin="relative_risk_low", ymax="relative_risk_high", fill="model_slug", group="model_slug"),
-            outline_type="full", alpha=0.1, color=None,
+            outline_type="full", alpha=0.22, color=None,
+        )
+        + pn.geom_line(
+            data=_rr_pooled_katz,
+            mapping=pn.aes(x="limit", y="relative_risk_low", color="model_slug", group="model_slug"),
+            size=0.4, linetype="dotted", show_legend=False,
+        )
+        + pn.geom_line(
+            data=_rr_pooled_katz,
+            mapping=pn.aes(x="limit", y="relative_risk_high", color="model_slug", group="model_slug"),
+            size=0.4, linetype="dotted", show_legend=False,
         )
         + pn.geom_point(alpha=0.3, size=1)
         + pn.geom_line(pn.aes(y="relative_risk_smooth"), size=1, alpha=0.8)

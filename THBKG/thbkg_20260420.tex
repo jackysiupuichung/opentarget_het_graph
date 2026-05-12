@@ -1031,10 +1031,12 @@ rate of the remaining pairs.
 We report RR@$N$ at $N \in \{10, 20, 30, 40, 50, 100\}$, matching the
 cutoffs used in Czech et al.'s primary results table (Figure~4 of
 \citet{Czech2024CLINICALFORECASTING}), as well as at the top-1\% and top-2\% cutoffs used
-in their main performance figure. Results are reported as equally-weighted
-averages across the 13 retained therapeutic areas; per-therapeutic-area
-RR@$N$ point estimates carry 95\% Katz log-method confidence intervals
-\citep{Katz1978ObtainingStudies}.
+in their main performance figure. Results are reported as
+equally-weighted averages across the 13 retained therapeutic areas; the
+RR@$N$ curve for the proposed model additionally carries a 95\% Katz
+log-method confidence interval \citep{Katz1978ObtainingStudies}, computed
+from pooled exposed/control counts over the full test set and shown as
+a shaded band in Figure~\ref{fig:rr_by_limit}.
 
 \textbf{AUROC} and \textbf{Average Precision (AP)} are reported as
 secondary metrics, again following Czech et al.\ \citep{Czech2024CLINICALFORECASTING}. Czech
@@ -1253,10 +1255,13 @@ the edge-feature-free \hgt{} and \compgcn{} do not.
 experimental conditions of Table~\ref{tab:conditions} plus the RDG and
 OTS references, averaged across 13 therapeutic areas under
 decision-aligned evaluation (Open Targets 23.06). Vertical dotted lines
-mark the top 1\% and top 2\% of all test pairs. The proposed P3
-(\eahgt{} with both edge features) is the top model at every cutoff;
-all \hgt{}-with-edge-features variants and \rgcn{} exceed RDG across
-the actionable range.}
+mark the top 1\% and top 2\% of all test pairs. The shaded band is the
+95\% Katz log-method confidence interval for the proposed P3
+(\eahgt{}) curve, derived from pooled exposed/control counts across the
+full test set (upper edge clipped at the plot ceiling); it lies
+entirely above the RDG curve across the actionable range. P3 is the top
+model at every cutoff; all \hgt{}-with-edge-features variants and
+\rgcn{} exceed RDG.}
 \label{fig:rr_by_limit}
 \end{figure*}
 
