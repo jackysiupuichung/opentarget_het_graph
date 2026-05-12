@@ -1,0 +1,56 @@
+experiment:
+  name: target_discovery_hgt
+
+data:
+  graph_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/graph/hetero_graph_with_features_datatype.pt
+  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/progression/temporal_graph_datatype_mappings.pt
+  undirected: false
+
+model:
+  name: hgt
+  hidden_dim: 128
+  num_heads: 2
+  num_layers: 2
+  dropout: 0.2
+  use_rte: false
+  use_edge_features: true
+  edge_feat_cols: [0, 1]
+  edge_feat_dim: 2
+
+train:
+  output_dir: runs/target_discovery
+  num_epochs: 50
+  lr: 0.0004346878320299101
+  weight_decay: 0.0018260646941480677
+  eta_min: 1e-6
+  cosine_t_max: 10
+  batch_size: 1024
+  num_neighbors: [20, 5]
+  lambdarank:
+    impl: allrank          # allrank | allrank_grouped (per-disease slate -> flat list)
+    weighing_scheme: lambdaRank_scheme
+    reduction: sum
+    reduction_log: binary
+    sigma: 1.4319388789983414
+    ndcg_k: 100
+  early_stopping:
+    enabled: true
+    patience: 5
+    metric: ndcg@100       # macro NDCG@100 over val slates
+
+discovery:
+  # Chronological split by first-trial-edge year. None = open-ended.
+  split:
+    train: [null, 2012]
+    val:   [2013, 2015]
+    test:  [2016, null]
+  neg_ratio: 50            # negatives per positive in TRAIN slates
+  ks: [100, 200, 500]
+  # Diseases to TRAIN on (slates). Empty = every disease with >=1 train positive.
+  train_diseases: []
+  # Diseases to EVALUATE (full candidate pool per disease). Empty = every disease
+  # with >=1 test positive.
+  eval_diseases: []
+  # Eval scoring batch size for the (large) full-pool pass; default 4x train.
+  eval_batch_size: null
+  eval_num_workers: 4

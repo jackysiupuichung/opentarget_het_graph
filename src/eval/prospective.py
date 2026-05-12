@@ -307,3 +307,234 @@ def run_prospective_eval(
             wandb.log(log_dict)
     except Exception as e:
         print(f"wandb logging skipped: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Target-discovery training/eval support
+# ---------------------------------------------------------------------------
+#
+# Unlike the prospective eval above (which scores an *advancement* model as a
+# recommender), the discovery setting trains and evaluates directly on the
+# (target, disease) candidate-pair population. The split is chronological by
+# year range, and a pair's label in a given split is "did this pair acquire its
+# first trial-related edge inside that split's time window". Splits are mutually
+# exclusive: a pair positive in an earlier split is excluded from later pools.
+#
+# A "trial-related edge" is any clinical_trial_* edge (either orientation) or an
+# advancement edge — i.e. exactly the set used by `_trial_etypes` / `ADV_ETYPE`.
+
+
+def first_trial_year_by_pair(data) -> dict[tuple[int, int], int]:
+    """Map (target_idx, disease_idx) -> earliest year of any trial-related edge.
+
+    Covers all clinical_trial_* relations (either orientation) and the
+    advancement relation. Pairs with no trial-related edge are absent from the
+    returned dict.
+    """
+    out: dict[tuple[int, int], int] = {}
+
+    def _ingest(etype):
+        src, _, dst = etype
+        ei = data[etype].edge_index
+        et_time = data[etype].edge_time
+        if src == "target" and dst == "disease":
+            t_row, d_row = ei[0].tolist(), ei[1].tolist()
+        elif src == "disease" and dst == "target":
+            d_row, t_row = ei[0].tolist(), ei[1].tolist()
+        else:
+            raise ValueError(f"Unexpected etype orientation: {etype}")
+        for t, d, yr in zip(t_row, d_row, et_time.tolist()):
+            key = (t, d)
+            prev = out.get(key)
+            if prev is None or yr < prev:
+                out[key] = int(yr)
+
+    for et in _trial_etypes(data):
+        _ingest(et)
+    _ingest(ADV_ETYPE)
+    return out
+
+
+def build_split_positive_sets(
+    first_year: dict[tuple[int, int], int],
+    split_ranges: dict[str, tuple[int | None, int | None]],
+) -> dict[str, set[tuple[int, int]]]:
+    """Partition trial pairs into train/val/test by first-trial-year window.
+
+    split_ranges: {"train": (lo, hi), "val": (lo, hi), "test": (lo, hi)} where
+    `None` means open-ended. A pair lands in the *first* split (train < val <
+    test order) whose [lo, hi] window contains its first-trial-year, so the sets
+    are mutually exclusive.
+    """
+    order = ["train", "val", "test"]
+    sets: dict[str, set[tuple[int, int]]] = {k: set() for k in order}
+    for pair, yr in first_year.items():
+        for split in order:
+            lo, hi = split_ranges[split]
+            if (lo is None or yr >= lo) and (hi is None or yr <= hi):
+                sets[split].add(pair)
+                break
+    return sets
+
+
+def build_candidate_targets_for_disease(
+    disease_idx: int,
+    num_targets: int,
+    excluded_pairs: set[tuple[int, int]],
+) -> list[int]:
+    """Target indices forming this disease's candidate pool (excluding pairs
+    that are already positives at/earlier than the split's cutoff)."""
+    excluded = {t for (t, d) in excluded_pairs if d == disease_idx}
+    return [t for t in range(num_targets) if t not in excluded]
+
+
+def build_discovery_slates(
+    *,
+    diseases: list[int],
+    num_targets: int,
+    positive_set: set[tuple[int, int]],
+    excluded_pairs: set[tuple[int, int]],
+    neg_ratio: int,
+    rng: np.random.Generator,
+    cutoff_year: int,
+):
+    """Build per-disease ranking slates for a chronological split.
+
+    For every disease that has >=1 positive in `positive_set`, the slate is its
+    positives plus `neg_ratio * n_pos` negatives sampled (without replacement)
+    from its candidate pool (= all targets minus `excluded_pairs`, minus this
+    split's positives). Negatives are resampled on every call so callers can
+    rebuild slates each epoch.
+
+    Returns
+    -------
+    edge_label_index : LongTensor[2, N]   (row 0 = target idx, row 1 = disease idx)
+    edge_label       : FloatTensor[N]     (1.0 positive, 0.0 negative)
+    edge_label_time  : LongTensor[N]      (constant = cutoff_year, for the
+                                           temporal LinkNeighborLoader)
+    group_id         : LongTensor[N]      (slate id, contiguous from 0; one per
+                                           eligible disease — used to group the
+                                           ranking loss)
+    disease_idx      : LongTensor[N]      (the disease index per row)
+    """
+    pos_by_disease: dict[int, list[int]] = {}
+    for (t, d) in positive_set:
+        pos_by_disease.setdefault(d, []).append(t)
+
+    src_list: list[int] = []
+    dst_list: list[int] = []
+    lbl_list: list[float] = []
+    grp_list: list[int] = []
+
+    gid = 0
+    for d in diseases:
+        pos_targets = pos_by_disease.get(d)
+        if not pos_targets:
+            continue
+        pos_set_d = set(pos_targets)
+        excl_d = {tt for (tt, dd) in excluded_pairs if dd == d}
+        # Candidate negatives: all targets not positive in this split and not
+        # excluded (already positive at/before cutoff in an earlier split).
+        neg_pool = [
+            t for t in range(num_targets)
+            if t not in pos_set_d and t not in excl_d
+        ]
+        n_neg = min(len(neg_pool), neg_ratio * len(pos_targets))
+        if n_neg == 0 or not neg_pool:
+            # Degenerate: no negatives available for this disease. Skip — a
+            # one-class slate carries no ranking signal.
+            continue
+        neg_sample = rng.choice(np.asarray(neg_pool), size=n_neg, replace=False)
+        for t in pos_targets:
+            src_list.append(int(t)); dst_list.append(int(d)); lbl_list.append(1.0); grp_list.append(gid)
+        for t in neg_sample.tolist():
+            src_list.append(int(t)); dst_list.append(int(d)); lbl_list.append(0.0); grp_list.append(gid)
+        gid += 1
+
+    if not src_list:
+        raise ValueError("build_discovery_slates produced no slates — check positives/cutoff.")
+
+    edge_label_index = torch.tensor([src_list, dst_list], dtype=torch.long)
+    edge_label = torch.tensor(lbl_list, dtype=torch.float)
+    edge_label_time = torch.full((len(src_list),), int(cutoff_year), dtype=torch.long)
+    group_id = torch.tensor(grp_list, dtype=torch.long)
+    disease_idx = torch.tensor(dst_list, dtype=torch.long)
+    return edge_label_index, edge_label, edge_label_time, group_id, disease_idx
+
+
+def compute_discovery_metrics(
+    *,
+    scores: np.ndarray,
+    disease_idx: np.ndarray,
+    target_idx: np.ndarray,
+    positive_set: set[tuple[int, int]],
+    full_candidate_counts: dict[int, int],
+    ks: Iterable[int],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Per-disease and macro precision@K / recall@K / NDCG-style hit metrics
+    over the *evaluation slates* (positives + sampled negatives per disease).
+
+    Note: when slates are subsampled negatives, precision@K is optimistic vs.
+    the full-pool version. For the headline number we instead expect the caller
+    to pass *full-pool* eval slates (every target per disease). `full_candidate_counts`
+    maps disease_idx -> pool size, used only to print the random baseline.
+
+    Returns (per_disease_df, macro_df, predictions_df).
+    """
+    ks = [int(k) for k in ks]
+    by_d: dict[int, list[int]] = {}
+    for i, d in enumerate(disease_idx.tolist()):
+        by_d.setdefault(d, []).append(i)
+
+    per_rows = []
+    pred_rows = []
+    macro_acc = {k: {"p": [], "r": []} for k in ks}
+    for d, idxs in by_d.items():
+        idxs = np.asarray(idxs)
+        s = scores[idxs]
+        t = target_idx[idxs]
+        lab = np.array([1 if (int(tt), int(d)) in positive_set else 0 for tt in t], dtype=np.int64)
+        n_pos = int(lab.sum())
+        if n_pos == 0:
+            continue
+        order = np.argsort(-s)
+        sl = lab[order]
+        for k in ks:
+            ke = min(k, len(sl))
+            hits = int(sl[:ke].sum())
+            p = hits / ke if ke else 0.0
+            r = hits / n_pos if n_pos else 0.0
+            macro_acc[k]["p"].append(p)
+            macro_acc[k]["r"].append(r)
+            per_rows.append({
+                "disease_idx": int(d),
+                "K": k,
+                "n_candidates": int(len(sl)),
+                "n_full_pool": int(full_candidate_counts.get(int(d), len(sl))),
+                "n_positives": n_pos,
+                "precision_at_k": p,
+                "recall_at_k": r,
+                "random_precision_at_k": n_pos / full_candidate_counts.get(int(d), len(sl)),
+            })
+        pred_rows.append(pd.DataFrame({
+            "disease_idx": int(d),
+            "target_idx": t,
+            "score": s,
+            "positive": lab,
+        }))
+
+    per_df = pd.DataFrame(per_rows)
+    macro_rows = []
+    for k in ks:
+        ps, rs = macro_acc[k]["p"], macro_acc[k]["r"]
+        if not ps:
+            continue
+        macro_rows.append({
+            "K": k,
+            "precision_at_k_macro": float(np.mean(ps)),
+            "recall_at_k_macro": float(np.mean(rs)),
+            "n_diseases": len(ps),
+        })
+    macro_df = pd.DataFrame(macro_rows)
+    pred_df = pd.concat(pred_rows, ignore_index=True) if pred_rows else pd.DataFrame()
+    return per_df, macro_df, pred_df

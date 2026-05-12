@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-gpu=8
 #SBATCH -t 1:0:0
 #SBATCH --mem-per-cpu=11G
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:nvidia_a100_80gb_pcie:1
 
 set -euo pipefail
 

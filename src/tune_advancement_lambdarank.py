@@ -47,6 +47,7 @@ from src.train_advancement_hgt import (
 from src.train_advancement_lambdarank import (
     run_epoch_lambdarank,
     evaluate_lambdarank,
+    _make_loss_fn,
 )
 
 
@@ -79,7 +80,7 @@ def build_sweep_config(cfg: DictConfig) -> dict:
     ss = OmegaConf.to_container(cfg.tune.search_space, resolve=True)
     parameters = {name: _spec_to_wandb(name, spec) for name, spec in ss.items()}
 
-    metric_name = cfg.tune.get("metric", "val/ndcg@10")
+    metric_name = cfg.tune.get("metric", "val/ndcg@50")
     return {
         "method": "bayes",
         "metric": {"name": metric_name, "goal": "maximize"},
@@ -110,7 +111,7 @@ def run_trial(cfg: DictConfig, device: torch.device,
     weight_decay  = wc.weight_decay
     batch_size    = wc.batch_size
     sigma         = wc.sigma
-    ndcg_k        = wc.get("ndcg_k", cfg.train.lambdarank.get("ndcg_k", 100))
+    ndcg_k        = wc.get("ndcg_k", cfg.train.lambdarank.get("ndcg_k", 50))
     cosine_t_max  = wc.cosine_t_max
     num_neighbors = [wc.num_neighbors_0, wc.num_neighbors_1]
     # Optional model-specific knob (CompGCN composition op). Pulled from sweep
@@ -119,7 +120,7 @@ def run_trial(cfg: DictConfig, device: torch.device,
 
     _edge_feat_cols = list(cfg.model.get("edge_feat_cols", [0, 1]))
     patience = cfg.train.early_stopping.patience if cfg.train.early_stopping.enabled else int(1e9)
-    es_metric = str(cfg.train.early_stopping.get("metric", "ndcg@10"))
+    es_metric = str(cfg.train.early_stopping.get("metric", "ndcg@50"))
     _log_keys = {"average_precision", "roc_auc",
                  "rr@10", "rr@50", "rr@100",
                  "ndcg@10", "ndcg@30", "ndcg@50", "ndcg@100",
@@ -165,14 +166,15 @@ def run_trial(cfg: DictConfig, device: torch.device,
     best_epoch = 1
     patience_ctr = 0
 
+    loss_fn, _ = _make_loss_fn(cfg, sigma=sigma, ndcg_k=int(ndcg_k))
     for epoch in range(1, cfg.train.num_epochs + 1):
         train_loss  = run_epoch_lambdarank(
             model, train_loader, optimizer, device,
-            edge_feat_cols=_edge_feat_cols, sigma=sigma, ndcg_k=int(ndcg_k), train=True,
+            edge_feat_cols=_edge_feat_cols, loss_fn=loss_fn, train=True,
         )
         val_metrics = evaluate_lambdarank(
             model, val_loader, device,
-            edge_feat_cols=_edge_feat_cols, sigma=sigma, ndcg_k=int(ndcg_k),
+            edge_feat_cols=_edge_feat_cols, loss_fn=loss_fn,
         )
 
         val_score = val_metrics.get(es_metric, float("nan"))
@@ -234,7 +236,7 @@ def _trial_worker(config_path: str, sweep_overrides: dict, run_id: str,
         ADV_ETYPE, split_advancement_edges, build_context_graph,
     )
     from src.train_advancement_lambdarank import (
-        run_epoch_lambdarank, evaluate_lambdarank,
+        run_epoch_lambdarank, evaluate_lambdarank, _make_loss_fn,
     )
 
     try:
@@ -263,14 +265,14 @@ def _trial_worker(config_path: str, sweep_overrides: dict, run_id: str,
         weight_decay  = float(wc["weight_decay"])
         batch_size    = int(wc["batch_size"])
         sigma         = float(wc["sigma"])
-        ndcg_k        = int(wc.get("ndcg_k", cfg.train.lambdarank.get("ndcg_k", 100)))
+        ndcg_k        = int(wc.get("ndcg_k", cfg.train.lambdarank.get("ndcg_k", 50)))
         cosine_t_max  = int(wc["cosine_t_max"])
         num_neighbors = [int(wc["num_neighbors_0"]), int(wc["num_neighbors_1"])]
         composition   = wc.get("composition", cfg.model.get("composition", None))
 
         edge_feat_cols = list(cfg.model.get("edge_feat_cols", [0, 1]))
         patience  = cfg.train.early_stopping.patience if cfg.train.early_stopping.enabled else int(1e9)
-        es_metric = str(cfg.train.early_stopping.get("metric", "ndcg@10"))
+        es_metric = str(cfg.train.early_stopping.get("metric", "ndcg@50"))
         log_keys  = {"average_precision", "roc_auc",
                      "rr@10", "rr@50", "rr@100",
                      "ndcg@10", "ndcg@30", "ndcg@50", "ndcg@100",
@@ -315,14 +317,15 @@ def _trial_worker(config_path: str, sweep_overrides: dict, run_id: str,
         best_epoch = 1
         patience_ctr = 0
 
+        loss_fn, _ = _make_loss_fn(cfg, sigma=sigma, ndcg_k=ndcg_k)
         for epoch in range(1, cfg.train.num_epochs + 1):
             train_loss = run_epoch_lambdarank(
                 model, train_loader, optimizer, device,
-                edge_feat_cols=edge_feat_cols, sigma=sigma, ndcg_k=ndcg_k, train=True,
+                edge_feat_cols=edge_feat_cols, loss_fn=loss_fn, train=True,
             )
             val_metrics = evaluate_lambdarank(
                 model, val_loader, device,
-                edge_feat_cols=edge_feat_cols, sigma=sigma, ndcg_k=ndcg_k,
+                edge_feat_cols=edge_feat_cols, loss_fn=loss_fn,
             )
             val_score = val_metrics.get(es_metric, float("nan"))
             if np.isnan(val_score):

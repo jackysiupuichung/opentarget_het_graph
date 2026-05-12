@@ -1,3 +1,3 @@
-from .lambdarank import lambdarank_loss
+from .lambdaLoss_allrank import lambdaLoss
 
-__all__ = ["lambdarank_loss"]
+__all__ = ["lambdaLoss"]

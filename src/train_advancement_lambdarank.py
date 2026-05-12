@@ -33,9 +33,155 @@ from src.train_advancement_hgt import (
     compute_metrics,
     predict_test,
 )
-from src.losses.lambdarank import lambdarank_loss
+from src.losses.lambdaLoss_allrank import lambdaLoss
 from src.benchmark.metrics import ndcg_at_k, ndcg_ta_mean_at_k, rr_ta_mean_at_k
 from src.models.utils import build_model
+
+
+def _build_grouped_slates(logits, labels, ta_groups_per_item, primary_tas, padded_value=-1.0):
+    """Reshape flat batch → [n_groups, max_slate_length] padded with -1.
+
+    For each primary TA seen in this batch, gather the items belonging to it
+    (one item can sit in multiple TAs; it's replicated across those TA slates).
+    Pad the shorter slates with `padded_value` so they share a row length.
+    Returns y_pred, y_true, or None if no TA had ≥2 items with at least one
+    positive (allRank's lambdaLoss needs both for valid pairs).
+    """
+    by_ta_pred: dict = {}
+    by_ta_true: dict = {}
+    for i, tas in enumerate(ta_groups_per_item):
+        if not tas:
+            continue
+        for ta in tas:
+            if ta not in primary_tas:
+                continue
+            by_ta_pred.setdefault(ta, []).append(logits[i])
+            by_ta_true.setdefault(ta, []).append(labels[i])
+
+    if not by_ta_pred:
+        return None, None
+
+    valid_groups = [
+        ta for ta, lab_list in by_ta_true.items()
+        if len(lab_list) >= 2 and torch.stack(lab_list).sum() > 0
+        and torch.stack(lab_list).sum() < len(lab_list)
+    ]
+    if not valid_groups:
+        return None, None
+
+    max_len = max(len(by_ta_pred[ta]) for ta in valid_groups)
+    n_groups = len(valid_groups)
+    device = logits.device
+
+    y_pred = logits.new_full((n_groups, max_len), padded_value)
+    y_true = labels.new_full((n_groups, max_len), padded_value)
+    for r, ta in enumerate(valid_groups):
+        slate_pred = torch.stack(by_ta_pred[ta])
+        slate_true = torch.stack(by_ta_true[ta])
+        y_pred[r, : slate_pred.shape[0]] = slate_pred
+        y_true[r, : slate_true.shape[0]] = slate_true
+    return y_pred, y_true
+
+
+def _make_loss_fn(cfg, sigma=None, ndcg_k=None, ta_by_disease_idx=None, primary_tas=None):
+    """Resolve `cfg.train.lambdarank.impl` into a callable (logits, labels) -> scalar loss.
+
+    Supported impls (the in-house lambdarank_loss has been retired — it was a
+    less-tested implementation of the same flat-slate math allRank provides):
+      * "allrank" (default): vendored allRank lambdaLoss treating the whole
+        training batch as one slate of shape [1, B].
+      * "allrank_grouped": vendored allRank lambdaLoss with one slate per
+        primary TA — items replicated across each of their primary TAs,
+        padded with -1. Optimises per-TA ranking instead of one global
+        ranking. Requires the TA mapping to be loaded.
+
+    Optional `sigma` / `ndcg_k` overrides let callers (e.g. the Optuna tuner)
+    inject per-trial values without mutating cfg.
+
+    Both impls also accept:
+      * cfg.train.lambdarank.weighing_scheme (default "lambdaRank_scheme")
+      * cfg.train.lambdarank.reduction       (default "sum")
+      * cfg.train.lambdarank.reduction_log   (default "binary")
+    """
+    lr_cfg = cfg.train.lambdarank
+    impl = str(lr_cfg.get("impl", "allrank")).lower()
+    if sigma is None:
+        sigma = float(lr_cfg.get("sigma", 1.0))
+    sigma = float(sigma)
+    # The loss truncation is fixed at NDCG@50 — it is the operating point we
+    # report and select on. Config may still override but the project default
+    # is 50, not the historical 100.
+    if ndcg_k is None:
+        ndcg_k = lr_cfg.get("ndcg_k", 50)
+    if ndcg_k is not None:
+        ndcg_k = int(ndcg_k)
+
+    if impl == "allrank":
+        weighing_scheme = str(lr_cfg.get("weighing_scheme", "lambdaRank_scheme"))
+        reduction = str(lr_cfg.get("reduction", "sum"))
+        reduction_log = str(lr_cfg.get("reduction_log", "binary"))
+        def loss_fn(logits, labels, disease_idx=None):
+            y_pred = logits.view(1, -1)
+            y_true = labels.view(1, -1)
+            return lambdaLoss(
+                y_pred, y_true,
+                sigma=sigma, k=ndcg_k,
+                weighing_scheme=weighing_scheme,
+                reduction=reduction,
+                reduction_log=reduction_log,
+            )
+        desc = (
+            f"allRank lambdaLoss flat (sigma={sigma}, k={ndcg_k}, "
+            f"weighing_scheme={weighing_scheme}, reduction={reduction})"
+        )
+
+    elif impl == "allrank_grouped":
+        if ta_by_disease_idx is None or primary_tas is None:
+            raise ValueError(
+                "lambdarank.impl='allrank_grouped' requires the TA mapping to be "
+                "loaded (advancement_data/features/therapeutic_areas.parquet + "
+                "primary_therapeutic_areas.json). Loading appears to have failed."
+            )
+        weighing_scheme = str(lr_cfg.get("weighing_scheme", "lambdaRank_scheme"))
+        reduction = str(lr_cfg.get("reduction", "sum"))
+        reduction_log = str(lr_cfg.get("reduction_log", "binary"))
+        primary_set = set(primary_tas)
+        def loss_fn(logits, labels, disease_idx=None):
+            if disease_idx is None:
+                # No grouping info available (e.g. tuner forgot to thread it
+                # through). Fall back to flat-slate behaviour with a warning
+                # the first time.
+                y_pred = logits.view(1, -1)
+                y_true = labels.view(1, -1)
+            else:
+                ta_groups_per_item = [
+                    ta_by_disease_idx.get(int(d), []) for d in disease_idx.tolist()
+                ]
+                y_pred, y_true = _build_grouped_slates(
+                    logits, labels, ta_groups_per_item, primary_set,
+                )
+                if y_pred is None:
+                    # No valid TA group in this batch (rare; tiny batch or
+                    # all positives/negatives in same TA). Skip step.
+                    return 0.0 * logits.sum()
+            return lambdaLoss(
+                y_pred, y_true,
+                sigma=sigma, k=ndcg_k,
+                weighing_scheme=weighing_scheme,
+                reduction=reduction,
+                reduction_log=reduction_log,
+            )
+        desc = (
+            f"allRank lambdaLoss grouped-by-TA (sigma={sigma}, k={ndcg_k}, "
+            f"weighing_scheme={weighing_scheme}, reduction={reduction})"
+        )
+
+    else:
+        raise ValueError(
+            f"Unknown lambdarank.impl: {impl!r}. Expected 'allrank' or 'allrank_grouped'."
+        )
+
+    return loss_fn, desc
 
 
 def _load_disease_ta_map(
@@ -76,7 +222,7 @@ def _load_disease_ta_map(
     return ta_by_disease_idx, primary_tas
 
 
-def run_epoch_lambdarank(model, loader, optimizer, device, edge_feat_cols, sigma, ndcg_k, train=True):
+def run_epoch_lambdarank(model, loader, optimizer, device, edge_feat_cols, loss_fn, train=True):
     model.train() if train else model.eval()
     total_loss, n_batches = 0.0, 0
 
@@ -102,7 +248,9 @@ def run_epoch_lambdarank(model, loader, optimizer, device, edge_feat_cols, sigma
             )
             labels = batch[ADV_ETYPE].edge_label.float()
             logits = out
-            loss = lambdarank_loss(logits, labels, sigma=sigma, k=ndcg_k)
+            disease_local = batch[ADV_ETYPE].edge_label_index[1]
+            disease_idx = batch["disease"].n_id[disease_local]
+            loss = loss_fn(logits, labels, disease_idx=disease_idx)
 
             if train:
                 optimizer.zero_grad()
@@ -118,7 +266,7 @@ def run_epoch_lambdarank(model, loader, optimizer, device, edge_feat_cols, sigma
 
 @torch.no_grad()
 def evaluate_lambdarank(
-    model, loader, device, edge_feat_cols, sigma, ndcg_k,
+    model, loader, device, edge_feat_cols, loss_fn,
     ta_by_disease_idx=None, primary_tas=None,
 ):
     model.eval()
@@ -152,7 +300,8 @@ def evaluate_lambdarank(
     logits_t = torch.cat(all_logits)
     labels_t = torch.cat(all_labels).float()
 
-    val_loss = lambdarank_loss(logits_t, labels_t, sigma=sigma, k=ndcg_k).item()
+    val_disease_idx = torch.cat(all_disease_idx) if all_disease_idx else None
+    val_loss = loss_fn(logits_t, labels_t, disease_idx=val_disease_idx).item()
 
     logits = logits_t.numpy()
     labels = (labels_t > 0).numpy().astype(int)
@@ -279,11 +428,38 @@ def main(cfg):
 
     _edge_feat_cols = list(cfg.model.get("edge_feat_cols", [0, 1]))
 
-    sigma = float(cfg.train.lambdarank.get("sigma", 1.0))
-    ndcg_k = cfg.train.lambdarank.get("ndcg_k", 100)
-    if ndcg_k is not None:
-        ndcg_k = int(ndcg_k)
-    print(f"LambdaRank: sigma={sigma}, ndcg_k={ndcg_k}")
+    repo_root = Path(__file__).resolve().parents[1]
+    ta_parquet_path = str(cfg.data.get(
+        "ta_parquet",
+        repo_root / "advancement_data/features/therapeutic_areas.parquet",
+    ))
+    primary_tas_json_path = str(cfg.data.get(
+        "primary_tas_json",
+        repo_root / "advancement_data/results/primary_therapeutic_areas.json",
+    ))
+    ta_by_disease_idx, primary_tas = None, None
+    if Path(ta_parquet_path).exists() and Path(primary_tas_json_path).exists():
+        mappings_for_ta = torch.load(cfg.data.mappings_file, weights_only=False)
+        disease_mapping = mappings_for_ta["node_mapping"]["disease"]
+        ta_by_disease_idx, primary_tas = _load_disease_ta_map(
+            ta_parquet_path, primary_tas_json_path, disease_mapping
+        )
+        print(
+            f"TA-grouped NDCG enabled: {len(ta_by_disease_idx)} diseases mapped, "
+            f"{len(primary_tas)} primary TAs."
+        )
+    else:
+        print(
+            f"TA-grouped NDCG disabled (missing {ta_parquet_path} or "
+            f"{primary_tas_json_path})."
+        )
+
+    loss_fn, loss_desc = _make_loss_fn(
+        cfg,
+        ta_by_disease_idx=ta_by_disease_idx,
+        primary_tas=primary_tas,
+    )
+    print(f"LambdaRank loss: {loss_desc}")
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay
@@ -319,38 +495,12 @@ def main(cfg):
         shuffle=False,
     )
 
-    repo_root = Path(__file__).resolve().parents[1]
-    ta_parquet_path = str(cfg.data.get(
-        "ta_parquet",
-        repo_root / "advancement_data/features/therapeutic_areas.parquet",
-    ))
-    primary_tas_json_path = str(cfg.data.get(
-        "primary_tas_json",
-        repo_root / "advancement_data/results/primary_therapeutic_areas.json",
-    ))
-    ta_by_disease_idx, primary_tas = None, None
-    if Path(ta_parquet_path).exists() and Path(primary_tas_json_path).exists():
-        mappings_for_ta = torch.load(cfg.data.mappings_file, weights_only=False)
-        disease_mapping = mappings_for_ta["node_mapping"]["disease"]
-        ta_by_disease_idx, primary_tas = _load_disease_ta_map(
-            ta_parquet_path, primary_tas_json_path, disease_mapping
-        )
-        print(
-            f"TA-grouped NDCG enabled: {len(ta_by_disease_idx)} diseases mapped, "
-            f"{len(primary_tas)} primary TAs."
-        )
-    else:
-        print(
-            f"TA-grouped NDCG disabled (missing {ta_parquet_path} or "
-            f"{primary_tas_json_path})."
-        )
-
     epoch_rows = []
     ckpt_path = output_dir / "best_model.pt"
     es_cfg = cfg.train.get("early_stopping", {})
     es_enabled = bool(es_cfg.get("enabled", True))
     patience = int(es_cfg.get("patience", 10)) if es_enabled else int(1e9)
-    es_metric = str(es_cfg.get("metric", "ndcg@100"))
+    es_metric = str(es_cfg.get("metric", "ndcg@50"))
     print(f"Early stopping on val/{es_metric}, patience={patience}")
 
     test_edge_index = edge_index[:, test_mask]
@@ -371,13 +521,13 @@ def main(cfg):
     for epoch in range(1, cfg.train.num_epochs + 1):
         train_loss = run_epoch_lambdarank(
             model, train_loader, optimizer, device,
-            edge_feat_cols=_edge_feat_cols, sigma=sigma, ndcg_k=ndcg_k, train=True,
+            edge_feat_cols=_edge_feat_cols, loss_fn=loss_fn, train=True,
         )
         scheduler.step()
 
         val_metrics = evaluate_lambdarank(
             model, val_loader, device,
-            edge_feat_cols=_edge_feat_cols, sigma=sigma, ndcg_k=ndcg_k,
+            edge_feat_cols=_edge_feat_cols, loss_fn=loss_fn,
             ta_by_disease_idx=ta_by_disease_idx, primary_tas=primary_tas,
         )
         val_score = val_metrics.get(es_metric, float("nan"))

@@ -27,6 +27,8 @@ train:
   batch_size: 512
   num_neighbors: [30, 20]
   lambdarank:
+    impl: allrank
+    weighing_scheme: lambdaRank_scheme
     sigma: 1.2063299196579966
     ndcg_k: 50
   early_stopping:
