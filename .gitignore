@@ -15,3 +15,7 @@ venv/
 
 # Data directories (root level only, not src/data)
 /data/
+
+# THBKG paper repo (tracked in its own GitHub repo) and local backups
+THBKG/
+THBKG.bak.*/
