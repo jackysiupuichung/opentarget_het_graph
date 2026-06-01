@@ -94,7 +94,7 @@ def build_sweep_config(cfg: DictConfig) -> dict:
 
     return {
         "method": "bayes",
-        "metric": {"name": "val/rr@100", "goal": "maximize"},
+        "metric": {"name": "val/rs@100", "goal": "maximize"},
         "early_terminate": {
             "type": "hyperband",
             "min_iter": 5,
@@ -114,8 +114,8 @@ def run_trial(cfg: DictConfig, device: torch.device,
               output_dir: Path):
     """One W&B sweep agent call = single chronological train/val fit.
 
-    Trains until val/rr@100 stops improving (early stopping with patience),
-    reports the best val/rr@100 as the trial's score.
+    Trains until val/rs@100 stops improving (early stopping with patience),
+    reports the best val/rs@100 as the trial's score.
     """
 
     wc = wandb.config
@@ -133,7 +133,7 @@ def run_trial(cfg: DictConfig, device: torch.device,
     _edge_feat_cols = list(cfg.model.get("edge_feat_cols", [0, 1]))
     patience = cfg.train.early_stopping.patience if cfg.train.early_stopping.enabled else int(1e9)
     _log_keys = {"average_precision", "average_precision@100", "roc_auc",
-                 "rr@10", "rr@50", "rr@100", "val_loss"}
+                 "rs@10", "rs@50", "rs@100", "val_loss"}
 
     run_dir = output_dir / wandb.run.id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -174,7 +174,7 @@ def run_trial(cfg: DictConfig, device: torch.device,
         batch_size=batch_size, shuffle=False,
     )
 
-    best_val_rr  = -1.0
+    best_val_rs  = -1.0
     best_epoch   = 1
     patience_ctr = 0
 
@@ -184,9 +184,9 @@ def run_trial(cfg: DictConfig, device: torch.device,
                                 pos_weight=pos_weight, focal_gamma=focal_gamma)
         val_metrics = evaluate(model, val_loader, device, edge_feat_cols=_edge_feat_cols)
 
-        val_rr = val_metrics["rr@100"]
-        if np.isnan(val_rr):
-            val_rr = -1.0
+        val_rs = val_metrics["rs@100"]
+        if np.isnan(val_rs):
+            val_rs = -1.0
 
         scheduler.step()
 
@@ -196,8 +196,8 @@ def run_trial(cfg: DictConfig, device: torch.device,
             step=epoch,
         )
 
-        if val_rr > best_val_rr:
-            best_val_rr  = val_rr
+        if val_rs > best_val_rs:
+            best_val_rs  = val_rs
             best_epoch   = epoch
             patience_ctr = 0
         else:
@@ -206,9 +206,9 @@ def run_trial(cfg: DictConfig, device: torch.device,
                 print(f"  early stop at epoch {epoch} (best epoch {best_epoch})")
                 break
 
-    wandb.summary["best_val_rr@100"] = best_val_rr
-    wandb.log({"val/rr@100": best_val_rr})
-    print(f"  trial best rr@100={best_val_rr:.4f}  best_epoch={best_epoch}  "
+    wandb.summary["best_val_rs@100"] = best_val_rs
+    wandb.log({"val/rs@100": best_val_rs})
+    print(f"  trial best rs@100={best_val_rs:.4f}  best_epoch={best_epoch}  "
           f"(train={len(train_idx)}, val={len(val_idx)})")
 
 

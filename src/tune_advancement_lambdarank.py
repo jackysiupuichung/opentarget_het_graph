@@ -122,7 +122,7 @@ def run_trial(cfg: DictConfig, device: torch.device,
     patience = cfg.train.early_stopping.patience if cfg.train.early_stopping.enabled else int(1e9)
     es_metric = str(cfg.train.early_stopping.get("metric", "ndcg@50"))
     _log_keys = {"average_precision", "roc_auc",
-                 "rr@10", "rr@50", "rr@100",
+                 "rs@10", "rs@50", "rs@100",
                  "ndcg@10", "ndcg@30", "ndcg@50", "ndcg@100",
                  "val_loss"}
 
@@ -223,6 +223,7 @@ def _trial_worker(config_path: str, sweep_overrides: dict, run_id: str,
     """
     import os
     import sys
+    import random
     import numpy as np
     import torch
     from omegaconf import OmegaConf
@@ -237,23 +238,69 @@ def _trial_worker(config_path: str, sweep_overrides: dict, run_id: str,
     )
     from src.train_advancement_lambdarank import (
         run_epoch_lambdarank, evaluate_lambdarank, _make_loss_fn,
+        _load_disease_ta_map,
     )
 
     try:
         cfg = OmegaConf.load(config_path)
 
+        # Determinism: mirror train_advancement_lambdarank.main(). Without
+        # this, every sweep trial runs with arbitrary RNG state, so "best
+        # trial" rankings reflect random init noise rather than HP effects.
+        seed = int(cfg.get("seed", 42))
+        os.environ["PYTHONHASHSEED"] = str(seed)
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Load and split graph.
+        _data_cfg = cfg.data
         data = load_event_graph(cfg.data.graph_file,
-                                to_undirected=bool(cfg.data.get("undirected", False)))
-        train_mask, val_mask, _, _ = split_advancement_edges(data)
+                                to_undirected=bool(_data_cfg.get("undirected", False)))
+        train_mask, val_mask, _, _ = split_advancement_edges(
+            data,
+            cutoff_year=int(_data_cfg.get("train_cutoff_year", 2010)),
+            val_min_year=_data_cfg.get("val_min_year", None),
+            val_max_year=_data_cfg.get("val_max_year", None),
+        )
         edge_index = data[ADV_ETYPE].edge_index
         edge_attr  = data[ADV_ETYPE].edge_attr
         edge_time  = data[ADV_ETYPE].edge_time
         train_idx = train_mask.nonzero(as_tuple=True)[0]
         val_idx   = val_mask.nonzero(as_tuple=True)[0]
         context = build_context_graph(data)
+
+        # TA mapping for ndcg_ta_mean@K / rs_ta_mean@K (when configured as the
+        # selection / sweep metric, these must be computed; otherwise eval falls
+        # back to pooled metrics only).
+        repo_root = Path(__file__).resolve().parents[1]
+        ta_parquet_path = str(_data_cfg.get(
+            "ta_parquet",
+            repo_root / "advancement_data/features/therapeutic_areas.parquet",
+        ))
+        primary_tas_json_path = str(_data_cfg.get(
+            "primary_tas_json",
+            repo_root / "advancement_data/results/primary_therapeutic_areas.json",
+        ))
+        ta_by_disease_idx, primary_tas = None, None
+        if Path(ta_parquet_path).exists() and Path(primary_tas_json_path).exists():
+            mappings_for_ta = torch.load(_data_cfg.mappings_file, weights_only=False)
+            disease_mapping = mappings_for_ta["node_mapping"]["disease"]
+            ta_by_disease_idx, primary_tas = _load_disease_ta_map(
+                ta_parquet_path, primary_tas_json_path, disease_mapping,
+            )
+            queue.put(("print",
+                       f"  TA-grouped NDCG enabled: {len(ta_by_disease_idx)} diseases, "
+                       f"{len(primary_tas)} primary TAs"))
+        else:
+            queue.put(("print",
+                       f"  TA-grouped NDCG disabled (missing {ta_parquet_path} or "
+                       f"{primary_tas_json_path})"))
 
         # Resolve sweep-overridden hyperparameters.
         wc = sweep_overrides
@@ -269,13 +316,21 @@ def _trial_worker(config_path: str, sweep_overrides: dict, run_id: str,
         cosine_t_max  = int(wc["cosine_t_max"])
         num_neighbors = [int(wc["num_neighbors_0"]), int(wc["num_neighbors_1"])]
         composition   = wc.get("composition", cfg.model.get("composition", None))
+        decoder_kind    = str(wc.get("decoder_kind", cfg.model.get("decoder_kind", "mlp")))
+        decoder_dropout = float(wc.get("decoder_dropout", cfg.model.get("decoder_dropout", dropout)))
 
         edge_feat_cols = list(cfg.model.get("edge_feat_cols", [0, 1]))
         patience  = cfg.train.early_stopping.patience if cfg.train.early_stopping.enabled else int(1e9)
         es_metric = str(cfg.train.early_stopping.get("metric", "ndcg@50"))
+        es_mode   = str(cfg.train.early_stopping.get("mode", "max")).lower()
+        assert es_mode in ("max", "min"), f"early_stopping.mode must be 'max' or 'min', got {es_mode}"
         log_keys  = {"average_precision", "roc_auc",
-                     "rr@10", "rr@50", "rr@100",
+                     "rs@10", "rs@50", "rs@100",
                      "ndcg@10", "ndcg@30", "ndcg@50", "ndcg@100",
+                     "ndcg_ta_mean@10", "ndcg_ta_mean@30",
+                     "ndcg_ta_mean@50", "ndcg_ta_mean@100",
+                     "rs_ta_mean@10", "rs_ta_mean@30",
+                     "rs_ta_mean@50", "rs_ta_mean@100",
                      "val_loss"}
 
         # Build model (with optional composition for CompGCN).
@@ -286,6 +341,8 @@ def _trial_worker(config_path: str, sweep_overrides: dict, run_id: str,
             use_rte=cfg.model.get("use_rte", False),
             use_edge_features=cfg.model.get("use_edge_features", False),
             edge_feat_dim=cfg.model.get("edge_feat_dim", 2),
+            decoder_kind=decoder_kind,
+            decoder_dropout=decoder_dropout,
         )
         if composition is not None and cfg.model.name == "compgcn":
             build_kwargs["composition"] = composition
@@ -313,11 +370,14 @@ def _trial_worker(config_path: str, sweep_overrides: dict, run_id: str,
             batch_size=batch_size, shuffle=False,
         )
 
-        best_val = -1.0
+        best_val = float("-inf") if es_mode == "max" else float("inf")
         best_epoch = 1
         patience_ctr = 0
 
-        loss_fn, _ = _make_loss_fn(cfg, sigma=sigma, ndcg_k=ndcg_k)
+        loss_fn, _ = _make_loss_fn(
+            cfg, sigma=sigma, ndcg_k=ndcg_k,
+            ta_by_disease_idx=ta_by_disease_idx, primary_tas=primary_tas,
+        )
         for epoch in range(1, cfg.train.num_epochs + 1):
             train_loss = run_epoch_lambdarank(
                 model, train_loader, optimizer, device,
@@ -326,17 +386,20 @@ def _trial_worker(config_path: str, sweep_overrides: dict, run_id: str,
             val_metrics = evaluate_lambdarank(
                 model, val_loader, device,
                 edge_feat_cols=edge_feat_cols, loss_fn=loss_fn,
+                ta_by_disease_idx=ta_by_disease_idx,
+                primary_tas=primary_tas,
             )
             val_score = val_metrics.get(es_metric, float("nan"))
             if np.isnan(val_score):
-                val_score = -1.0
+                val_score = float("-inf") if es_mode == "max" else float("inf")
             scheduler.step()
 
             log_payload = {"train/loss": train_loss, "epoch": epoch, "__step": epoch}
             log_payload.update({f"val/{k}": float(v) for k, v in val_metrics.items() if k in log_keys})
             queue.put(("log", log_payload))
 
-            if val_score > best_val:
+            improved = (val_score > best_val) if es_mode == "max" else (val_score < best_val)
+            if improved:
                 best_val   = val_score
                 best_epoch = epoch
                 patience_ctr = 0
@@ -346,8 +409,11 @@ def _trial_worker(config_path: str, sweep_overrides: dict, run_id: str,
                     queue.put(("print", f"  early stop at epoch {epoch} (best epoch {best_epoch})"))
                     break
 
-        queue.put(("summary", {f"best_val_{es_metric}": best_val}))
-        queue.put(("log", {f"val/{es_metric}": best_val}))
+        # Guard against -inf / +inf if no epoch ever improved.
+        if not np.isfinite(best_val):
+            best_val = float("nan")
+        queue.put(("summary", {f"best_val_{es_metric}": float(best_val)}))
+        queue.put(("log", {f"val/{es_metric}": float(best_val)}))
         queue.put(("print", f"  trial best {es_metric}={best_val:.4f}  best_epoch={best_epoch}  "
                             f"(train={len(train_idx)}, val={len(val_idx)})"))
     except Exception as e:
