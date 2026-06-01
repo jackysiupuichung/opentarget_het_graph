@@ -19,3 +19,9 @@ venv/
 # THBKG paper repo (tracked in its own GitHub repo) and local backups
 THBKG/
 THBKG.bak.*/
+
+# SLURM job stdout dumps (sbatch writes <jobname>.o<jobid> into the cwd)
+*.o[0-9]*
+
+# Stray run logs in repo root (wandb sync, edge previews, etc.)
+/*.log
