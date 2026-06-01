@@ -18,16 +18,20 @@ DEBUG_FLAG=""
 # === Configuration ===
 CONFIG="config/event_graph_config.yaml"
 
+# === OpenTargets release (23.06 | 26.03) ===
+OT_VERSION="${OT_VERSION:-26.03}"
+
 # --- Input ---
-INPUT_EVIDENCE_DIR="/gpfs/scratch/bty414/opentarget_evidences/26.03/evidenceDated/"
-# INPUT_EVIDENCE_DIR="data/evidenceDated_subset/26.03"
-NODE_INPUT_DIR="/gpfs/scratch/bty414/opentarget_evidences/26.03/evidenceDated/"
+EVIDENCE_SUBDIR="evidenceDated"
+[ "$OT_VERSION" = "23.06" ] && EVIDENCE_SUBDIR="evidenceDated"
+INPUT_EVIDENCE_DIR="/gpfs/scratch/bty414/opentarget_evidences/${OT_VERSION}/${EVIDENCE_SUBDIR}/"
+NODE_INPUT_DIR="${INPUT_EVIDENCE_DIR}"
 NODE_SCHEMA="config/node_schema.yaml"
-EDGE_SCHEMA="config/edge_schema.yaml"
+EDGE_SCHEMA="config/edge_schema_${OT_VERSION}.yaml"
 STATIC_EDGE_SCHEMA="config/static_edge_schema.yaml"
 
 # --- Output ---
-OUTPUT_BASE="/gpfs/scratch/bty414/opentarget_evidences/26.03"
+OUTPUT_BASE="/gpfs/scratch/bty414/opentarget_evidences/${OT_VERSION}"
 # OUTPUT_BASE="output"
 KG_OUTPUT_DIR="${OUTPUT_BASE}/evidences"
 RAW_EDGES_DIR="${KG_OUTPUT_DIR}/edges"
@@ -44,7 +48,7 @@ EVENT_OUTPUT_DIR="${OUTPUT_BASE}/progression"
 #   --input "$INPUT_EVIDENCE_DIR" \
 #   --node-input "$NODE_INPUT_DIR" \
 #   --node-schema "$NODE_SCHEMA" \
-#   --edge-schema "$EDGE_SCHEMA" \
+#   --ot-version "$OT_VERSION" \
 #   --static-edge-schema "$STATIC_EDGE_SCHEMA" \
 #   --node-output "$RAW_NODES_DIR" \
 #   --edge-output "$RAW_EDGES_DIR" \

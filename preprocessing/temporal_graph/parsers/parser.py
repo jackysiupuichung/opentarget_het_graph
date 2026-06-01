@@ -10,7 +10,6 @@ import re
 import urllib3
 import xml.etree.ElementTree as ET
 from .edge_extractor import extract_edge_props
-from .chembl_trial_expander import expand_chembl_clinical_trials
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -20,7 +19,7 @@ PUBMED_CACHE = {}
 
 REQUIRED_EDGE_COLS = ["sourceId", "targetId", "source_type", "target_type", "relation", "datasourceId", "score", "year"]
 # First four are legacy columns (pre-26.03); last two are the unified date columns in 26.03+
-YEAR_PRIORITY = ["curationYear", "studyYear", "publicationYear", "studyStartDate", "publicationDate", "evidenceDate"]
+YEAR_PRIORITY = ["resolvedTrialDate", "curationYear", "studyYear", "publicationYear", "studyStartDate", "publicationDate", "evidenceDate"]
 
 
 def fetch_pubmed_years(pubmed_ids):
@@ -134,11 +133,11 @@ class BaseParser:
                             if df_sub.empty:
                                 continue
 
-                            # For ChEMBL, split by relation (outcome type) after expansion
-                            if name == "chembl" and "relation" in df_sub.columns:
-                                # Group by unique relations (outcome types)
+                            # If the spec used a column-driven `relation` (one row -> one
+                            # of several relation values), split outputs by relation so each
+                            # bucket gets its own file.
+                            if "relation" in sub_spec and "relation" in df_sub.columns:
                                 for relation_val, group_df in df_sub.groupby("relation"):
-                                    # Create a temporary spec for output naming
                                     temp_spec = sub_spec.copy()
                                     temp_spec["relation_name"] = relation_val
                                     out_name = self.output_name(name, temp_spec, group_df)
@@ -340,7 +339,7 @@ class EdgeParser(BaseParser):
         # Handle year
         if "year" in props:
             # Dynamic edges → pick best year candidate
-            DATE_COLS = {"studyStartDate", "publicationDate", "evidenceDate"}
+            DATE_COLS = {"resolvedTrialDate", "studyStartDate", "publicationDate", "evidenceDate"}
             for col in YEAR_PRIORITY:
                 if col in row and pd.notnull(row[col]):
                     if col in DATE_COLS:
@@ -388,9 +387,6 @@ class EdgeParser(BaseParser):
                     expanded_edges.append(self._add_props(edge, row, props))
 
                 out = pd.DataFrame(expanded_edges)
-                # Expand ChEMBL clinical trials by outcome type
-                if name == "chembl" and "relation" in out.columns:
-                    out = expand_chembl_clinical_trials(out)
                 return out
 
         # === Case 2: Nested dict expansion (e.g. pathways.id) ===
@@ -417,9 +413,6 @@ class EdgeParser(BaseParser):
                             expanded_edges.append(edge)
 
                 out = pd.DataFrame(expanded_edges)
-                # Expand ChEMBL clinical trials by outcome type
-                if name == "chembl" and "relation" in out.columns:
-                    out = expand_chembl_clinical_trials(out)
                 return out
 
         # === Case 3: List-like targetId expansion ===
@@ -455,9 +448,6 @@ class EdgeParser(BaseParser):
                         expanded_edges.append(self._add_props(edge, row, props))
             if expanded_edges:
                 out = pd.DataFrame(expanded_edges)
-                # Expand ChEMBL clinical trials by outcome type
-                if name == "chembl" and "relation" in out.columns:
-                    out = expand_chembl_clinical_trials(out)
                 return out
 
         raise ValueError(f"Unsupported targetId {tgt_col} for {name}")

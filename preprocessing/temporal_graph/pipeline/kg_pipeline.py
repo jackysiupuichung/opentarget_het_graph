@@ -42,7 +42,9 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="Directory with evidence parquet files (edge source)")
     parser.add_argument("--node-input", default=None, help="Directory with node parquet files; defaults to --input if omitted")
     parser.add_argument("--node-schema", required=True, help="YAML schema for nodes")
-    parser.add_argument("--edge-schema", required=True, help="YAML schema for edges")
+    parser.add_argument("--ot-version", choices=["23.06", "26.03"], default="26.03",
+                        help="OpenTargets release; selects config/edge_schema_<ver>.yaml unless --edge-schema is given")
+    parser.add_argument("--edge-schema", default=None, help="Override edge schema path (otherwise derived from --ot-version)")
     parser.add_argument("--static-edge-schema", required=True, help="YAML schema for static edges")
     parser.add_argument("--node-output", required=True, help="Output directory for parsed node parquet files")
     parser.add_argument("--edge-output", required=True, help="Output directory for parsed edge parquet files")
@@ -51,12 +53,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    edge_schema = args.edge_schema or f"config/edge_schema_{args.ot_version}.yaml"
+    if not os.path.exists(edge_schema):
+        raise FileNotFoundError(f"Edge schema not found: {edge_schema}")
+    print(f"🔹 Using edge schema: {edge_schema} (OT {args.ot_version})")
 
     run_pipeline(
         input=args.input,
         node_input=args.node_input if args.node_input else args.input,
         node_schema=args.node_schema,
-        edge_schema=args.edge_schema,
+        edge_schema=edge_schema,
         static_edge_schema=args.static_edge_schema,
         node_output=args.node_output,
         edge_output=args.edge_output,
