@@ -70,6 +70,13 @@ DEFAULT_RUNS: dict[str, str] = {
     # edge features. Built by build_matched_ablation_ensembles.py.
     "abl_score_ens":    f"{_SCRATCH_2603}/ablation_matched/score/ensemble",
     "abl_novelty_ens":  f"{_SCRATCH_2603}/ablation_matched/novelty/ensemble",
+    # Encoder-family baselines: 5-seed rank-fused ensembles, each encoder at its
+    # individual best 23.06 params, under the headline grouped recipe.
+    # Built by build_encoder_baseline_ensembles.py.
+    "enc_hgt_ens":      f"{_SCRATCH_2603}/encoder_baselines/hgt/ensemble",
+    "enc_gatv2_ens":    f"{_SCRATCH_2603}/encoder_baselines/gatv2/ensemble",
+    "enc_rgcn_ens":     f"{_SCRATCH_2603}/encoder_baselines/rgcn/ensemble",
+    "enc_compgcn_ens":  f"{_SCRATCH_2603}/encoder_baselines/compgcn/ensemble",
     # ndcgk_corr study — random-val LambdaRank, ndcg_k cutoff sweep
     "ndcgk100":         f"{_SCRATCH_2603}/ndcgk_corr/ndcgk100",
 }
@@ -560,6 +567,11 @@ def evaluate(
         # Matched-recipe ablation ensembles (same recipe as p3_eahgt_both)
         "abl_score_ens":          "EAHGT-score",
         "abl_novelty_ens":        "EAHGT-novelty",
+        # Encoder-family baseline ensembles
+        "enc_hgt_ens":            "HGT",
+        "enc_gatv2_ens":          "GATv2",
+        "enc_rgcn_ens":           "R-GCN",
+        "enc_compgcn_ens":        "CompGCN",
         # Bilinear-decoder variant (collapse-resistant; reported alongside MLP)
         "p3_eahgt_both_bilinear": "EAHGT-Bilinear",
         # 23.06 EAHGT variations (decoder / loss / centering / training)
@@ -764,6 +776,20 @@ def evaluate(
     # same quantity.
     logger.info("Computing pooled relative success by limit per stratum...")
     _strat_limits = sorted({*np.arange(10, 101, 10).tolist(), 75})
+    # Pooled metrics are restricted to the SAME evaluation population as the
+    # TA-averaged metric: pairs whose disease belongs to >=1 retained (primary)
+    # therapeutic area. The TA exclusion (biological_process et al.) is applied
+    # once, up front, to BOTH the pooled and TA-averaged paths -- not removed
+    # post-hoc from pooling. Excluded-only diseases (notably the generic
+    # biological_process bucket) otherwise dominate the single global ranking and
+    # are not part of the reported evaluation set.
+    _primary_ta_set_pool = set(primary_therapeutic_areas) - {"all"}
+    _primary_disease_filter = set(
+        therapeutic_areas.loc[
+            therapeutic_areas["therapeutic_area_name"].isin(_primary_ta_set_pool),
+            "disease_id",
+        ].unique()
+    )
     rs_pooled_strat_frames = []
     for stratum, pair_filter in pair_strata.items():
         if pair_filter is not None and len(pair_filter) == 0:
@@ -771,6 +797,7 @@ def evaluate(
         rs_ps = _compute_relative_success_by_limit(
             evaluation_dataset, all_model_names, _strat_limits,
             confidence=0.95, pair_filter=pair_filter,
+            disease_filter=_primary_disease_filter,
         )
         rs_ps["stratum"] = stratum
         rs_pooled_strat_frames.append(rs_ps)
@@ -791,9 +818,14 @@ def evaluate(
         + list(range(50, 200, 5))
         + list(range(200, 501, 10))
     ))
-    logger.info("Computing pooled RS with 95%% Katz CI over %d limits...", len(_fine_limits))
+    logger.info(
+        "Computing pooled RS with 95%% Katz CI over %d limits "
+        "(restricted to %d primary-TA diseases)...",
+        len(_fine_limits), len(_primary_disease_filter),
+    )
     rs_pooled = _compute_relative_success_by_limit(
-        evaluation_dataset, all_model_names, _fine_limits, confidence=0.95
+        evaluation_dataset, all_model_names, _fine_limits, confidence=0.95,
+        disease_filter=_primary_disease_filter,
     )
     rs_pooled["model_slug"] = rs_pooled["model_name"].map(model_display)
     rs_pooled = rs_pooled.sort_values(["model_slug", "limit"])
