@@ -54,6 +54,21 @@ EdgeType = Tuple[str, str, str]
 METHODS = ("ig", "abs_ig", "attention", "random")
 
 
+def _edge_types_with_index(batch) -> List[EdgeType]:
+    """Edge types in ``batch`` that actually carry an edge_index tensor.
+
+    A sampled HeteroData can list edge types whose storage has no edge_index
+    (empty/placeholder); accessing ``.edge_index`` on those raises. Filter them
+    so masking only touches real edges."""
+    out = []
+    for et in batch.edge_types:
+        store = batch[et]
+        ei = getattr(store, "edge_index", None)
+        if ei is not None:
+            out.append(et)
+    return out
+
+
 # ----------------------------------------------------------------------------
 # Per-edge attribution, flattened across edge types with a stable order.
 # ----------------------------------------------------------------------------
@@ -135,7 +150,7 @@ def _masked_dicts(
     ei_out: Dict[EdgeType, torch.Tensor] = {}
     ef_out: Dict[EdgeType, torch.Tensor] = {}
     full_feat = build_edge_feat_dict(batch, edge_feat_cols)
-    for et in batch.edge_types:
+    for et in _edge_types_with_index(batch):
         ei = batch[et].edge_index
         mask = torch.as_tensor(keep_cols[et], dtype=torch.bool, device=ei.device)
         ei_out[et] = ei[:, mask]
@@ -195,7 +210,8 @@ def main(args: argparse.Namespace) -> None:
         edge_keys, scores = _flat_attributions(
             rt, batch, etd, args.n_steps, args.seed + bi)
         E = len(edge_keys)
-        type_sizes = {et: batch[et].edge_index.size(1) for et in batch.edge_types}
+        type_sizes = {et: batch[et].edge_index.size(1)
+                      for et in _edge_types_with_index(batch)}
         if E == 0:
             print(f"[fidelity] {t_id}->{d_id}: no attributable edges, skip", flush=True)
             continue
