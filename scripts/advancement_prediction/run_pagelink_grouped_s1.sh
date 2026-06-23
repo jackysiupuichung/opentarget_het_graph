@@ -3,10 +3,10 @@
 #SBATCH -o %x.o%j
 #SBATCH -p gpushort
 #SBATCH -A pilot
-#SBATCH -n 1
-#SBATCH --cpus-per-gpu=8
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
 #SBATCH -t 1:0:0
-#SBATCH --mem-per-cpu=11G
+#SBATCH --mem=32G
 #SBATCH --gres=gpu:nvidia_a100_80gb_pcie:1
 
 # PaGE-Link path explanations (#4) on the grouped seed-1 26.03 checkpoint.
@@ -30,8 +30,8 @@ python pagelink_explain.py \
     --pairs-csv    "$PAIRS" \
     --mask-epochs  200 \
     --lr           0.01 \
-    --size-coeff   5e-3 \
-    --entropy-coeff 1e-1 \
+    --size-coeff   5e-2 \
+    --entropy-coeff 2e-1 \
     --num-paths    5 \
     --min-mask     0.1 \
     --verbose \
