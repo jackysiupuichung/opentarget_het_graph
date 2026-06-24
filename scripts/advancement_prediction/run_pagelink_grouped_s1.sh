@@ -37,6 +37,6 @@ python pagelink_explain.py \
     --size-coeff   5e-2 \
     --entropy-coeff 2e-1 \
     --num-paths    5 \
-    --min-mask     0.1 \
+    --min-mask     0.05 \
     --verbose \
     --out-dir      "$OUT_DIR"
