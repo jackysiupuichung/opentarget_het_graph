@@ -564,6 +564,9 @@ def evaluate(
         "p1_eahgt_score":         "EAHGT-score",
         "p2_eahgt_novelty":       "EAHGT-novelty",
         "p3_eahgt_both":          "EAHGT",
+        # Official grouped 5-seed ensemble (headline model) — display as EAHGT
+        "grouped_ensemble_latest_s5": "EAHGT",
+        "grouped_ensemble_s5":        "EAHGT",
         # Matched-recipe ablation ensembles (same recipe as p3_eahgt_both)
         "abl_score_ens":          "EAHGT-score",
         "abl_novelty_ens":        "EAHGT-novelty",
@@ -622,11 +625,30 @@ def evaluate(
     all_model_names = ordered_names
     color_map  = _build_color_map(all_model_names)
     slug_colors = {model_display.get(m, m): color_map[m] for m in all_model_names}
+    # EAHGT ablation variants share the EAHGT colour and are distinguished only
+    # by line style (see _SLUG_LINETYPES). This keeps the headline line plots
+    # reading "one model family, three configurations" rather than three
+    # unrelated curves.
+    for _variant_slug in ("EAHGT-score", "EAHGT-novelty"):
+        if "EAHGT" in slug_colors and _variant_slug in slug_colors:
+            slug_colors[_variant_slug] = slug_colors["EAHGT"]
     # Helper: make model_slug an ordered categorical so plotnine renders the
     # legend in canonical order (EAHGT first, baselines last).
     _slug_categories = list(slug_colors.keys())
     def _as_ordered_slug(s):
         return pd.Categorical(s, categories=_slug_categories, ordered=True)
+
+    # Headline line plots show only the proposed model + its two ablation
+    # variants alongside the OTS / RDG reference baselines. The full model
+    # comparison (HGT, GATv2, R-GCN, CompGCN, …) is relegated to a separate
+    # "*_supp.png" version of each line plot for the supplementary material.
+    _HEADLINE_SLUGS = ["EAHGT", "EAHGT-score", "EAHGT-novelty", "RDG", "OTS"]
+    # Line style per slug: EAHGT solid, its two variants dashed/dotted (same
+    # colour), everything else solid. Used via a linetype aesthetic so the
+    # legend carries the style too.
+    _SLUG_LINETYPES = {s: "solid" for s in _slug_categories}
+    _SLUG_LINETYPES["EAHGT-score"]   = "dashed"
+    _SLUG_LINETYPES["EAHGT-novelty"] = "dotted"
 
     # ------------------------------------------------------------------
     # Test-pair stratification (target novelty × evidence sparsity)
@@ -921,39 +943,60 @@ def evaluate(
     # stronger models whose RR exceeds 7 at small N.
     _rs_plot_max = float(rs_pooled["relative_success_high_smooth"].max()) * 1.05
     _nudge = 0.15
+
+    def _build_pooled_plot(rs_df: pd.DataFrame, ci_df: pd.DataFrame) -> pn.ggplot:
+        """Pooled RS-vs-N plot for the given subset of models.
+
+        Variant curves (EAHGT-score / EAHGT-novelty) share the EAHGT colour and
+        are separated by a linetype aesthetic; the legend folds both colour and
+        linetype into a single per-model key.
+        """
+        _slugs = [s for s in _slug_categories if s in set(rs_df["model_slug"])]
+        return (
+            pn.ggplot(rs_df, pn.aes(x="limit", y="relative_success", color="model_slug", fill="model_slug", linetype="model_slug", group="model_slug"))
+            + pn.geom_ribbon(
+                data=ci_df,
+                mapping=pn.aes(x="limit", ymin="relative_success_low_smooth", ymax="relative_success_high_smooth", fill="model_slug", group="model_slug"),
+                outline_type="full", alpha=0.20, color=None, inherit_aes=False,
+            )
+            + pn.geom_line(
+                data=ci_df,
+                mapping=pn.aes(x="limit", y="relative_success_low_smooth", color="model_slug", group="model_slug"),
+                size=0.4, linetype="dotted", show_legend=False, inherit_aes=False,
+            )
+            + pn.geom_line(
+                data=ci_df,
+                mapping=pn.aes(x="limit", y="relative_success_high_smooth", color="model_slug", group="model_slug"),
+                size=0.4, linetype="dotted", show_legend=False, inherit_aes=False,
+            )
+            + pn.geom_point(alpha=0.3, size=1, show_legend=False)
+            + pn.geom_line(pn.aes(y="relative_success_smooth"), size=1, alpha=0.8)
+            + pn.geom_hline(yintercept=1, linetype="dashed")
+            + pn.annotate("text", x=_max_limit_plot, y=1 + _nudge, label="Random (RS=1)", size=8, ha="right")
+            + pn.annotate("segment", x=_pct1, xend=_pct1, y=0, yend=_rs_plot_max, color="grey", linetype="dotted", size=0.6)
+            + pn.annotate("text", x=_pct1, y=_rs_plot_max, label=f"Top 1%\n(n={_pct1})", size=7, ha="center", va="top", color="grey")
+            + pn.annotate("segment", x=_pct2, xend=_pct2, y=0, yend=_rs_plot_max, color="grey", linetype="dotted", size=0.6)
+            + pn.annotate("text", x=_pct2, y=_rs_plot_max, label=f"Top 2%\n(n={_pct2})", size=7, ha="center", va="top", color="grey")
+            + pn.scale_color_manual(values=slug_colors, breaks=_slugs)
+            + pn.scale_fill_manual(values=slug_colors, breaks=_slugs)
+            + pn.scale_linetype_manual(values=_SLUG_LINETYPES, breaks=_slugs)
+            + pn.scale_x_continuous(limits=(0, _max_limit_plot))
+            + pn.scale_y_continuous(limits=(0, _rs_plot_max), oob=mizani.bounds.squish)
+            + pn.labs(x="N top target-disease pairs", y="relative success", color="model", fill="model", linetype="model")
+            + pn.theme_minimal()
+            + pn.theme(figure_size=(10, 4))
+        )
+
+    # Headline: proposed model + two ablation variants + OTS / RDG only.
+    _rs_pooled_headline = rs_pooled[rs_pooled["model_slug"].isin(_HEADLINE_SLUGS)].copy()
     _save_plot(
-        pn.ggplot(rs_pooled, pn.aes(x="limit", y="relative_success", color="model_slug", fill="model_slug", group="model_slug"))
-        + pn.geom_ribbon(
-            data=_rs_ci_eahgt,
-            mapping=pn.aes(x="limit", ymin="relative_success_low_smooth", ymax="relative_success_high_smooth", fill="model_slug", group="model_slug"),
-            outline_type="full", alpha=0.20, color=None,
-        )
-        + pn.geom_line(
-            data=_rs_ci_eahgt,
-            mapping=pn.aes(x="limit", y="relative_success_low_smooth", color="model_slug", group="model_slug"),
-            size=0.4, linetype="dotted", show_legend=False,
-        )
-        + pn.geom_line(
-            data=_rs_ci_eahgt,
-            mapping=pn.aes(x="limit", y="relative_success_high_smooth", color="model_slug", group="model_slug"),
-            size=0.4, linetype="dotted", show_legend=False,
-        )
-        + pn.geom_point(alpha=0.3, size=1)
-        + pn.geom_line(pn.aes(y="relative_success_smooth"), size=1, alpha=0.8)
-        + pn.geom_hline(yintercept=1, linetype="dashed")
-        + pn.annotate("text", x=_max_limit_plot, y=1 + _nudge, label="Random (RS=1)", size=8, ha="right")
-        + pn.annotate("segment", x=_pct1, xend=_pct1, y=0, yend=_rs_plot_max, color="grey", linetype="dotted", size=0.6)
-        + pn.annotate("text", x=_pct1, y=_rs_plot_max, label=f"Top 1%\n(n={_pct1})", size=7, ha="center", va="top", color="grey")
-        + pn.annotate("segment", x=_pct2, xend=_pct2, y=0, yend=_rs_plot_max, color="grey", linetype="dotted", size=0.6)
-        + pn.annotate("text", x=_pct2, y=_rs_plot_max, label=f"Top 2%\n(n={_pct2})", size=7, ha="center", va="top", color="grey")
-        + pn.scale_color_manual(values=slug_colors, breaks=_slug_categories)
-        + pn.scale_fill_manual(values=slug_colors, breaks=_slug_categories)
-        + pn.scale_x_continuous(limits=(0, _max_limit_plot))
-        + pn.scale_y_continuous(limits=(0, _rs_plot_max), oob=mizani.bounds.squish)
-        + pn.labs(x="N top target-disease pairs", y="relative success", color="model", fill="model")
-        + pn.theme_minimal()
-        + pn.theme(figure_size=(10, 4)),
+        _build_pooled_plot(_rs_pooled_headline, _rs_ci_eahgt),
         plots_dir / "relative_success_by_limit_pooled.png",
+    )
+    # Supplementary: all models (full comparison including encoder baselines).
+    _save_plot(
+        _build_pooled_plot(rs_pooled, _rs_ci_eahgt),
+        plots_dir / "relative_success_by_limit_pooled_supp.png",
     )
 
     # Plot 1b (supp): TA-averaged mean-of-ratios (no CI band — the per-TA
@@ -964,20 +1007,33 @@ def evaluate(
     # versions capped at 8.0 to match the reference paper; that clips
     # stronger models.
     _rs_mor_plot_max = float(rs_mor["relative_success_smooth"].max()) * 1.05 if "relative_success_smooth" in rs_mor.columns else 5.0
+
+    def _build_mor_plot(rs_df: pd.DataFrame) -> pn.ggplot:
+        _slugs = [s for s in _slug_categories if s in set(rs_df["model_slug"])]
+        return (
+            pn.ggplot(rs_df, pn.aes(x="limit", y="relative_success", color="model_slug", fill="model_slug", linetype="model_slug", group="model_slug"))
+            + pn.geom_point(alpha=0.3, size=1, show_legend=False)
+            + pn.geom_line(pn.aes(y="relative_success_smooth"), size=1, alpha=0.8)
+            + pn.geom_hline(yintercept=1, linetype="dashed")
+            + pn.annotate("text", x=_max_limit_plot, y=1 + _nudge, label="Random (RS=1)", size=8, ha="right")
+            + pn.scale_color_manual(values=slug_colors, breaks=_slugs)
+            + pn.scale_fill_manual(values=slug_colors, breaks=_slugs)
+            + pn.scale_linetype_manual(values=_SLUG_LINETYPES, breaks=_slugs)
+            + pn.scale_x_continuous(limits=(0, _max_limit_plot))
+            + pn.scale_y_continuous(limits=(0, _rs_mor_plot_max), oob=mizani.bounds.squish)
+            + pn.labs(x="N top target-disease pairs (per therapeutic area)", y="mean relative success across TAs", color="model", fill="model", linetype="model")
+            + pn.theme_minimal()
+            + pn.theme(figure_size=(10, 4))
+        )
+
+    _rs_mor_headline = rs_mor[rs_mor["model_slug"].isin(_HEADLINE_SLUGS)].copy()
     _save_plot(
-        pn.ggplot(rs_mor, pn.aes(x="limit", y="relative_success", color="model_slug", fill="model_slug", group="model_slug"))
-        + pn.geom_point(alpha=0.3, size=1)
-        + pn.geom_line(pn.aes(y="relative_success_smooth"), size=1, alpha=0.8)
-        + pn.geom_hline(yintercept=1, linetype="dashed")
-        + pn.annotate("text", x=_max_limit_plot, y=1 + _nudge, label="Random (RS=1)", size=8, ha="right")
-        + pn.scale_color_manual(values=slug_colors, breaks=_slug_categories)
-        + pn.scale_fill_manual(values=slug_colors, breaks=_slug_categories)
-        + pn.scale_x_continuous(limits=(0, _max_limit_plot))
-        + pn.scale_y_continuous(limits=(0, _rs_mor_plot_max), oob=mizani.bounds.squish)
-        + pn.labs(x="N top target-disease pairs (per therapeutic area)", y="mean relative success across TAs", color="model", fill="model")
-        + pn.theme_minimal()
-        + pn.theme(figure_size=(10, 4)),
+        _build_mor_plot(_rs_mor_headline),
         plots_dir / "relative_success_by_limit_ta_averaged.png",
+    )
+    _save_plot(
+        _build_mor_plot(rs_mor),
+        plots_dir / "relative_success_by_limit_ta_averaged_supp.png",
     )
 
     # Plot 3: Classification metrics by primary TA (boxplot) — stratum='all' only
