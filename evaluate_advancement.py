@@ -468,97 +468,6 @@ def _save_plot(plot: pn.ggplot, path: Path) -> None:
     plot.save(str(path), verbose=False, dpi=300)
 
 
-def _build_combined_rs_classification(
-    *, rs_headline, cm_melt, slug_colors, slug_order, linetypes,
-    pct1, pct2, rs_ymax, out_path,
-):
-    """Czech-style combined figure with one shared legend.
-
-    (a) TA-mean relative success vs top-N line plot (left, wide).
-    (b) Three stacked horizontal boxplots (ROC-AUC, AP, MCC; right).
-    A single legend keyed by model sits on the far right.
-    """
-    import matplotlib.pyplot as plt
-    from matplotlib.gridspec import GridSpec
-    from matplotlib.lines import Line2D
-
-    _ls = {"solid": "-", "dashed": "--", "dotted": ":"}
-    metrics = [("roc_auc", "ROC-AUC"), ("average_precision", "average precision"),
-               ("mcc", "MCC")]
-
-    fig = plt.figure(figsize=(13, 4.5), facecolor="white")
-    # left line panel | 3 stacked box panels | legend strip
-    gs = GridSpec(3, 3, figure=fig, width_ratios=[2.1, 1.4, 0.5],
-                  wspace=0.35, hspace=0.45)
-
-    # ---- (a) line plot spanning all 3 rows of the first column ----
-    ax_a = fig.add_subplot(gs[:, 0])
-    ycol = "relative_success_smooth" if "relative_success_smooth" in rs_headline.columns else "relative_success"
-    for slug in slug_order:
-        sub = rs_headline[rs_headline["model_slug"] == slug].sort_values("limit")
-        if sub.empty:
-            continue
-        ax_a.plot(sub["limit"], sub[ycol], color=slug_colors.get(slug, "#333"),
-                  linestyle=_ls.get(linetypes.get(slug, "solid"), "-"),
-                  linewidth=1.6, alpha=0.9)
-        ax_a.scatter(sub["limit"], sub["relative_success"],
-                     color=slug_colors.get(slug, "#333"), s=8, alpha=0.35, zorder=3)
-    ax_a.axhline(1.0, color="black", linestyle="--", linewidth=0.8)
-    for xp, lab in [(pct1, f"Top 1%\n(n={pct1})"), (pct2, f"Top 2%\n(n={pct2})")]:
-        ax_a.axvline(xp, color="grey", linestyle=":", linewidth=0.7)
-        ax_a.text(xp, rs_ymax * 0.98, lab, color="grey", fontsize=7,
-                  ha="center", va="top")
-    ax_a.set_xlim(0, 100)
-    ax_a.set_ylim(0, rs_ymax)
-    ax_a.set_xlabel("N top target-disease pairs (per therapeutic area)")
-    ax_a.set_ylabel("mean relative success across TAs")
-    ax_a.set_title("(a)", loc="left", fontsize=11)
-    ax_a.grid(color="#dddddd", linewidth=0.6)
-    ax_a.set_axisbelow(True)
-
-    # ---- (b) three stacked horizontal boxplots ----
-    order = [s for s in slug_order]
-    ypos = list(range(len(order)))[::-1]  # first model at top
-    for i, (mcol, mlabel) in enumerate(metrics):
-        ax = fig.add_subplot(gs[i, 1])
-        for slug, y in zip(order, ypos):
-            vals = cm_melt[(cm_melt["model_slug"] == slug) &
-                           (cm_melt["metric"] == mcol)]["value"].dropna().values
-            if len(vals) == 0:
-                continue
-            c = slug_colors.get(slug, "#333")
-            bp = ax.boxplot(vals, positions=[y], vert=False, widths=0.55,
-                            patch_artist=True, showfliers=False,
-                            medianprops=dict(color="black", linewidth=1.0))
-            for box in bp["boxes"]:
-                box.set(facecolor=c, alpha=0.55, edgecolor=c)
-            for w in bp["whiskers"] + bp["caps"]:
-                w.set(color=c)
-            ax.scatter(vals, [y] * len(vals) + (np.random.default_rng(0).uniform(-0.12, 0.12, len(vals))),
-                       color="black", s=5, alpha=0.4, zorder=3)
-        ax.set_yticks(ypos)
-        ax.set_yticklabels(order if i == len(metrics) - 1 else [""] * len(order),
-                           fontsize=8)
-        ax.set_title(mlabel, fontsize=9, loc="left")
-        ax.grid(axis="x", color="#dddddd", linewidth=0.6)
-        ax.set_axisbelow(True)
-        if i == 0:
-            ax.annotate("(b)", xy=(0, 1.25), xycoords="axes fraction", fontsize=11)
-
-    # ---- shared legend on the far right ----
-    ax_leg = fig.add_subplot(gs[:, 2])
-    ax_leg.axis("off")
-    handles = [Line2D([0], [0], color=slug_colors.get(s, "#333"),
-                      linestyle=_ls.get(linetypes.get(s, "solid"), "-"),
-                      linewidth=2, label=s) for s in slug_order]
-    ax_leg.legend(handles=handles, title="model", loc="center left",
-                  frameon=False, fontsize=9, title_fontsize=9)
-
-    fig.savefig(str(out_path), dpi=300, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    logger.info(f"Saved combined RS/classification figure to {out_path}")
-
-
 def _build_color_map(model_names: list[str]) -> dict:
     base = {
         "rdg__no_time__positive": _BASE_MODEL_COLORS["RDG"],
@@ -1107,6 +1016,10 @@ def evaluate(
             + pn.geom_line(pn.aes(y="relative_success_smooth"), size=1, alpha=0.8)
             + pn.geom_hline(yintercept=1, linetype="dashed")
             + pn.annotate("text", x=_max_limit_plot, y=1 + _nudge, label="Random (RS=1)", size=8, ha="right")
+            + pn.annotate("segment", x=_pct1, xend=_pct1, y=0, yend=_rs_mor_plot_max, color="grey", linetype="dotted", size=0.6)
+            + pn.annotate("text", x=_pct1, y=_rs_mor_plot_max, label=f"Top 1%\n(n={_pct1})", size=7, ha="center", va="top", color="grey")
+            + pn.annotate("segment", x=_pct2, xend=_pct2, y=0, yend=_rs_mor_plot_max, color="grey", linetype="dotted", size=0.6)
+            + pn.annotate("text", x=_pct2, y=_rs_mor_plot_max, label=f"Top 2%\n(n={_pct2})", size=7, ha="center", va="top", color="grey")
             + pn.scale_color_manual(values=slug_colors, breaks=_slugs)
             + pn.scale_fill_manual(values=slug_colors, breaks=_slugs)
             + pn.scale_linetype_manual(values=_SLUG_LINETYPES, breaks=_slugs)
@@ -1145,28 +1058,13 @@ def evaluate(
         + pn.scale_fill_manual(values=slug_colors, breaks=_slug_categories)
         + pn.labs(x="", y="", fill="model")
         + pn.theme_minimal()
-        + pn.theme(figure_size=(10, 5), legend_position="none",
-                   axis_text_x=pn.element_text(rotation=40, ha="right")),
+        # Model identity is carried by the fill legend, so drop the redundant
+        # model names on the x-axis.
+        + pn.theme(figure_size=(10, 5), legend_position="right",
+                   axis_text_x=pn.element_blank(),
+                   axis_ticks_major_x=pn.element_blank()),
         plots_dir / "classification_metrics_by_ta.png",
     )
-
-    # Plot 3c: Czech-style combined figure — (a) TA-mean RS vs N line plot,
-    # (b) three stacked horizontal boxplots (ROC-AUC, AP, MCC), one shared
-    # legend on the right. Matplotlib composition (plotnine cannot share a
-    # legend across a line panel and boxplot panels).
-    try:
-        _build_combined_rs_classification(
-            rs_headline=_rs_mor_headline,
-            cm_melt=cm_ta_melt,
-            slug_colors=slug_colors,
-            slug_order=[s for s in _slug_categories if s in _HEADLINE_SLUGS],
-            linetypes=_SLUG_LINETYPES,
-            pct1=_pct1, pct2=_pct2,
-            rs_ymax=_rs_mor_plot_max,
-            out_path=plots_dir / "rs_and_classification_combined.png",
-        )
-    except Exception as e:  # never let a plotting extra break the eval run
-        logger.warning(f"combined RS/classification figure failed: {e}")
 
     # Plot 3b: MCC per model (overall, stratum='all', TA='all')
     cm_overall_mcc = cm_all[cm_all["therapeutic_area_name"] == "all"].copy()
