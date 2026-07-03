@@ -68,6 +68,7 @@ class ExplainRuntime:
     test_edge_index: torch.Tensor
     test_edge_labels: torch.Tensor
     test_edge_times: torch.Tensor
+    latest_edge_only: bool = False
     _node_idx: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
     # ---- construction -----------------------------------------------------
@@ -109,6 +110,16 @@ class ExplainRuntime:
         model.load_state_dict(state)
         model.eval()
 
+        latest_edge_only = bool(cfg.model.get("latest_edge_only", False))
+        # When the model collapses to the latest edge per (src,dst) inside
+        # forward, the explainer must reason over the SAME post-collapse edge
+        # set, or masks/attributions (built on the pre-collapse subgraph) will
+        # not align with the model's messages. We collapse the batch ourselves
+        # (see collapse_batch) and disable the model's internal collapse so it
+        # does not run twice / on a different edge set.
+        if latest_edge_only:
+            model.encoder.latest_edge_only = False
+
         return cls(
             cfg=cfg, model=model, context=context, device=device,
             edge_feat_cols=list(cfg.model.get("edge_feat_cols", [0, 1])),
@@ -117,6 +128,7 @@ class ExplainRuntime:
             test_edge_index=edge_index[:, test_mask],
             test_edge_labels=edge_attr[test_mask, 0],
             test_edge_times=edge_time[test_mask],
+            latest_edge_only=latest_edge_only,
         )
 
     # ---- pair selection ---------------------------------------------------
@@ -139,6 +151,35 @@ class ExplainRuntime:
             if p is not None:
                 out.append(p)
         return np.array(out, dtype=np.int64)
+
+    # ---- latest-edge collapse (mask alignment) ----------------------------
+    def collapse_batch(self, batch):
+        """If the model uses ``latest_edge_only``, collapse this batch's edges
+        to the latest edge per (src,dst) per type IN PLACE, so the explainer's
+        edge universe matches the model's post-collapse messages. Idempotent
+        and a no-op when the model does not collapse. Must be called on every
+        batch before attribution / masking / prediction.
+        """
+        if not self.latest_edge_only:
+            return batch
+        from src.models.hgt import _keep_latest_edge_per_pair
+        ei = {et: batch[et].edge_index for et in batch.edge_types
+              if hasattr(batch[et], "edge_index")}
+        et_time = {et: batch[et].edge_time for et in ei
+                   if hasattr(batch[et], "edge_time") and batch[et].edge_time is not None}
+        et_feat = {et: batch[et].edge_attr for et in ei
+                   if hasattr(batch[et], "edge_attr") and batch[et].edge_attr is not None}
+        new_ei, new_time, new_feat = _keep_latest_edge_per_pair(ei, et_time, et_feat)
+        for et in ei:
+            # Recompute the keep columns for this type by matching the collapsed
+            # index back; _keep_latest_edge_per_pair already returns the reduced
+            # tensors, so assign them straight onto the store.
+            batch[et].edge_index = new_ei[et]
+            if et in new_time and new_time[et] is not None:
+                batch[et].edge_time = new_time[et]
+            if et in new_feat and new_feat[et] is not None:
+                batch[et].edge_attr = new_feat[et]
+        return batch
 
     # ---- subgraph loader --------------------------------------------------
     def pair_loader(self, pair_idx: np.ndarray) -> LinkNeighborLoader:
