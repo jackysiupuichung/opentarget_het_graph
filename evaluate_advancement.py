@@ -458,8 +458,9 @@ def _compute_rs_by_ta(evaluation_dataset: xr.Dataset,
 def _save_plot(plot: pn.ggplot, path: Path) -> None:
     logger.info(f"Saving plot to {path}")
     plot = plot + pn.theme(
-        plot_background=pn.element_rect(fill="white"),
-        panel_background=pn.element_rect(fill="white"),
+        # fill white AND set the rect edge to white so no border box is drawn
+        plot_background=pn.element_rect(fill="white", color="white"),
+        panel_background=pn.element_rect(fill="white", color="white"),
         panel_border=pn.element_blank(),
         axis_line=pn.element_blank(),
         panel_grid_major=pn.element_line(color="#dddddd"),

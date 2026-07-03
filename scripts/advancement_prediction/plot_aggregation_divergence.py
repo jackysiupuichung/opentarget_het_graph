@@ -84,7 +84,11 @@ p = (pn.ggplot(d, pn.aes(x="model", y="rs_p", color="agg"))
      + pn.labs(x="", y="relative success (log scale, 95% CI; × = RS$=$0)")
      + pn.theme_bw()
      + pn.theme(figure_size=(8.5, 8), axis_text_x=pn.element_text(rotation=40, ha="right"),
-                legend_position="top", panel_grid_minor=pn.element_blank()))
+                legend_position="top", panel_grid_minor=pn.element_blank(),
+                # drop the border box (theme_bw draws panel + plot borders)
+                panel_border=pn.element_blank(),
+                plot_background=pn.element_rect(fill="white", color="white"),
+                panel_background=pn.element_rect(fill="white", color="white")))
 p.save(OUT, dpi=300, verbose=False)
 print(f"wrote {OUT}")
 print(d.pivot_table(index=["model"], columns=["cutoff", "agg"], values="rs").round(2).to_string())
