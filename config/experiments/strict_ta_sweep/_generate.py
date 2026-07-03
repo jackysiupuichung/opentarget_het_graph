@@ -69,7 +69,7 @@ SBATCH_TMPL = """\
 #SBATCH --cpus-per-gpu=8
 #SBATCH -t 1:0:0
 #SBATCH --mem-per-cpu=11G
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:nvidia_a100_80gb_pcie:1
 
 set -euo pipefail
 REPO_ROOT="/data/home/bty414/opentarget_temporal_study/src/opentarget_het_graph"
