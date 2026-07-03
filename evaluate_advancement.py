@@ -1027,7 +1027,9 @@ def evaluate(
             + pn.scale_y_continuous(limits=(0, _rs_mor_plot_max), oob=mizani.bounds.squish)
             + pn.labs(x="N top target-disease pairs (per therapeutic area)", y="mean relative success across TAs", color="model", fill="model", linetype="model")
             + pn.theme_minimal()
-            + pn.theme(figure_size=(10, 4))
+            # (6.5, 5) matches the classification boxplot aspect so the two
+            # render at equal height as side-by-side subfigures.
+            + pn.theme(figure_size=(6.5, 5))
         )
 
     _rs_mor_headline = rs_mor[rs_mor["model_slug"].isin(_HEADLINE_SLUGS)].copy()
@@ -1054,13 +1056,15 @@ def evaluate(
         pn.ggplot(cm_ta_melt, pn.aes(x="model_slug", y="value", fill="model_slug"))
         + pn.geom_boxplot(outlier_size=1, alpha=0.6)
         + pn.geom_jitter(width=0.15, size=1.5, alpha=0.7)
-        + pn.facet_wrap("~ metric", scales="free_y", ncol=3)
+        + pn.facet_wrap("~ metric", scales="free_y", ncol=1)
         + pn.scale_fill_manual(values=slug_colors, breaks=_slug_categories)
         + pn.labs(x="", y="", fill="model")
         + pn.theme_minimal()
+        # Stacked metric facets (ncol=1) keep the panel tall and narrow so it
+        # aligns in height with the line plot as a side-by-side subfigure.
         # Model identity is carried by the fill legend, so drop the redundant
         # model names on the x-axis.
-        + pn.theme(figure_size=(10, 5), legend_position="right",
+        + pn.theme(figure_size=(6.5, 5), legend_position="right",
                    axis_text_x=pn.element_blank(),
                    axis_ticks_major_x=pn.element_blank()),
         plots_dir / "classification_metrics_by_ta.png",
