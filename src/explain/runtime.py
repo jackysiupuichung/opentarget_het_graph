@@ -69,6 +69,8 @@ class ExplainRuntime:
     test_edge_labels: torch.Tensor
     test_edge_times: torch.Tensor
     latest_edge_only: bool = False
+    # {node_type: {accession -> human name}} from the KG node parquets
+    name_maps: Dict[str, Dict[str, str]] = field(default_factory=dict)
     _node_idx: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
     # ---- construction -----------------------------------------------------
@@ -84,6 +86,7 @@ class ExplainRuntime:
             nt: {int(v): k for k, v in nm.items()}
             for nt, nm in mappings["node_mapping"].items()
         }
+        name_maps = cls._load_name_maps(cfg.data.graph_file)
 
         _, _, test_mask, _ = split_advancement_edges(data)
         edge_index = data[ADV_ETYPE].edge_index
@@ -133,12 +136,80 @@ class ExplainRuntime:
             cfg=cfg, model=model, context=context, device=device,
             edge_feat_cols=list(cfg.model.get("edge_feat_cols", [0, 1])),
             num_neighbors=list(cfg.train.num_neighbors),
-            mappings=mappings, id_maps=id_maps,
+            mappings=mappings, id_maps=id_maps, name_maps=name_maps,
             test_edge_index=edge_index[:, test_mask],
             test_edge_labels=edge_attr[test_mask, 0],
             test_edge_times=test_times,
             latest_edge_only=latest_edge_only,
         )
+
+    # ---- node names -------------------------------------------------------
+    @staticmethod
+    def _load_name_maps(graph_file: str) -> Dict[str, Dict[str, str]]:
+        """{node_type: {accession -> human name}} from the KG node parquets.
+
+        Mirrors explain_advancement._load_name_maps: target/reactome/go from
+        evidences/nodes, disease from evidenceDated/diseases (fallback to
+        nodes/diseases description), molecule from evidenceDated/molecule.
+        Best-effort — missing parquets are skipped, names fall back to accession.
+        """
+        base = Path(graph_file).resolve().parent.parent
+        nodes = base / "evidences" / "nodes"
+        out: Dict[str, Dict[str, str]] = {}
+
+        def _clean(x):
+            return "" if x is None else str(x).strip()
+
+        def _read(p, idcol, namecol):
+            df = pd.read_parquet(p, columns=[idcol, namecol])
+            return {str(k): _clean(v) for k, v in zip(df[idcol], df[namecol])
+                    if _clean(v)}
+
+        for nt, fname in (("target", "targets.parquet"),
+                          ("reactome", "reactome.parquet"),
+                          ("go", "go_ontology_terms.parquet")):
+            p = nodes / fname
+            if p.exists():
+                try:
+                    out[nt] = _read(p, "id", "name")
+                except Exception:
+                    pass
+        # disease
+        dmap: Dict[str, str] = {}
+        ed = base / "evidenceDated" / "diseases"
+        if ed.exists():
+            try:
+                dmap.update(_read(ed, "id", "name"))
+            except Exception:
+                pass
+        fb = nodes / "diseases.parquet"
+        if fb.exists():
+            try:
+                cols = pd.read_parquet(fb).columns
+                col = "description" if "description" in cols else (
+                    "name" if "name" in cols else None)
+                if col:
+                    for k, v in _read(fb, "id", col).items():
+                        dmap.setdefault(k, v)
+            except Exception:
+                pass
+        if dmap:
+            out["disease"] = dmap
+        mp = base / "evidenceDated" / "molecule"
+        if mp.exists():
+            try:
+                out["molecule"] = _read(mp, "id", "name")
+            except Exception:
+                pass
+        return out
+
+    def node_label(self, ntype: str, idx: int) -> str:
+        """'<accession> (<name>)' for a global node index, or a #idx fallback."""
+        acc = self.id_maps.get(ntype, {}).get(int(idx))
+        if acc is None:
+            return f"{ntype}#{idx}"
+        name = self.name_maps.get(ntype, {}).get(str(acc))
+        return f"{acc} ({name})" if name else str(acc)
 
     # ---- pair selection ---------------------------------------------------
     def select_pairs_from_csv(self, pairs_csv: str) -> np.ndarray:
