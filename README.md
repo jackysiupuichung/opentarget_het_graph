@@ -22,8 +22,9 @@ are licensed separately under Creative Commons Attribution 4.0 International
 
 ## Graph release
 
-The **canonical graph is the Open Targets 26.03 build** (20 relation types,
-schema in [config/edge_schema_26.03.yaml](config/edge_schema_26.03.yaml)).
+The **canonical graph is the Open Targets 26.03 build** (19 context relation
+types — 16 temporal, 3 static — plus the `advancement` label edge; schema in
+[config/edge_schema_26.03.yaml](config/edge_schema_26.03.yaml)).
 
 > **Note:** The 23.06 build described in [GRAPH_STRUCTURE.md](GRAPH_STRUCTURE.md)
 > contains a same-year clinical-trial-edge leak and is **deprecated** — all 23.06
