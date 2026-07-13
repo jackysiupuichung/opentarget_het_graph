@@ -25,3 +25,6 @@ THBKG.bak.*/
 
 # Stray run logs in repo root (wandb sync, edge previews, etc.)
 /*.log
+
+# Retired off-scope eval script (target-discovery task dropped from the benchmark)
+/evaluate_target_discovery_standalone.py
