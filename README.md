@@ -82,3 +82,70 @@ uv sync
 
 Training and evaluation are heavy GPU/CPU jobs and are run via SLURM (`sbatch`),
 not in the foreground.
+
+### Data location
+
+Large artifacts (the built graph, node mappings, and per-seed run
+checkpoints/predictions) live **outside** the repo. Two ways to obtain them:
+
+1. **Download the release** — the packaged 26.03 graph + advancement benchmark
+   is archived on Zenodo ([doi.org/10.5281/zenodo.20795232](https://doi.org/10.5281/zenodo.20795232),
+   CC-BY-4.0). Unpack it and point the code at it with:
+
+   ```bash
+   export THBKG_DATA_ROOT=/path/to/opentarget_evidences
+   ```
+
+   `evaluate_advancement.py` resolves its graph, mappings, and run registry
+   under `$THBKG_DATA_ROOT/26.03/...` (falling back to the author's cluster
+   scratch if unset). Individual paths can also be overridden per call, e.g.
+   `--graph_file` / `--mappings_file`.
+
+2. **Rebuild from source** — see the pipeline below.
+
+## Reproduce
+
+### 1. Build the graph from Open Targets evidence
+
+The graph is built in four stages (each a SLURM script under `scripts/`,
+run in order). They require an Open Targets 26.03 evidence dump and the
+IntAct / GO / Reactome / ChEMBL / EFO sources described in
+[GRAPH_STRUCTURE.md](GRAPH_STRUCTURE.md):
+
+```bash
+sbatch scripts/collecting_edges_01.sh        # dated event lists per datasource
+sbatch scripts/building_event_graph_02.sh    # HeteroData temporal + advancement edges
+sbatch scripts/collecting_node_features_03.sh # target/disease/molecule/GO/Reactome features
+sbatch scripts/assembling_graph_04.sh         # attach features -> final graph
+```
+
+Temporal scoring (harmonic-sum cumulative score + novelty) and the strict
+`<` as-of masking are applied during stages 1–2; constants live in
+`preprocessing/.../build_event_list.py`.
+
+### 2. Train the ensemble
+
+The headline EA-HGT result is a grouped five-seed (1, 7, 42, 123, 2024),
+validation-selected, percentile-rank-fused ensemble. Per-seed configs are in
+`config/experiments/headline/`; launch the per-seed run scripts under
+`scripts/advancement_prediction/headline/`, then fuse:
+
+```bash
+sbatch scripts/advancement_prediction/run_grouped_ensemble_strictmask.sh
+```
+
+Set `SAVE_PER_EPOCH_PREDS=1` during training so the ensemble builder can
+select each seed's checkpoint by validation per-area median RS@50.
+
+### 3. Evaluate
+
+```bash
+python evaluate_advancement.py                 # all registered runs with predictions
+python evaluate_advancement.py --only p3_eahgt_both,b1_hgt   # a subset
+```
+
+RS@K, NDCG@K, and classification metrics are reported per therapeutic area
+(TA-mean over the 13 retained areas) with Wilcoxon tests against a
+randomized-decisions baseline. RDG (Czech et al. ridge regression) and OTS
+(Open Targets global score) references are read from the packaged
+`evaluation_dataset.zarr`.

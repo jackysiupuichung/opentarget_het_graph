@@ -1,4 +1,5 @@
 import os
+import sys
 import csv
 import re
 import pandas as pd
@@ -73,6 +74,10 @@ class IntActParser(EdgeParser):
         return {"intact": df}
 
 if __name__ == "__main__":
-    test_file = "/Users/pui.chungsiu/Documents/opentarget_het_graph/data/evidenceDated_subset/23.06/intact/test_intact_human.txt"
+    # Smoke test: pass the IntAct MITAB file to parse as the first argument, e.g.
+    #   python -m preprocessing.temporal_graph.parsers.intact.parser path/to/intact_human.txt
+    if len(sys.argv) < 2:
+        sys.exit("usage: python parser.py <intact_mitab_file>")
+    test_file = sys.argv[1]
     parser = IntActParser(root_dir="data", schema_file="config/edge_schema.yaml", output_dir="output")
     parser.parse(file_path=test_file)

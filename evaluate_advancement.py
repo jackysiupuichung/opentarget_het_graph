@@ -19,6 +19,7 @@ Usage:
 """
 import json
 import logging
+import os
 import textwrap
 import numpy as np
 import pandas as pd
@@ -37,11 +38,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Run registry
 # ---------------------------------------------------------------------------
-_SCRATCH = "/gpfs/scratch/bty414/opentarget_evidences/23.06/runs"
+# Run directories live outside the repo (large checkpoints/predictions). By
+# default they resolve under the author's cluster scratch; set THBKG_DATA_ROOT
+# to point the run registry at your own copy (e.g. the Zenodo release unpacked
+# locally). The registry keys below are joined onto these roots.
+_DATA_ROOT = os.environ.get(
+    "THBKG_DATA_ROOT", "/gpfs/scratch/bty414/opentarget_evidences"
+)
+_SCRATCH = f"{_DATA_ROOT}/23.06/runs"
 # EAHGT ablation (Study B) was migrated to the 26.03 graph generation, which
 # reproduces the evaluation_dataset.zarr test pairs 9094/9094 and carries both
 # advancement edge features (score + novelty). Other models stay on 23.06.
-_SCRATCH_2603 = "/gpfs/scratch/bty414/opentarget_evidences/26.03/runs"
+_SCRATCH_2603 = f"{_DATA_ROOT}/26.03/runs"
+# Canonical 26.03 graph + node mappings (overridable per call via --graph_file /
+# --mappings_file, or globally via THBKG_DATA_ROOT).
+_GRAPH_FILE = f"{_DATA_ROOT}/26.03/graph/hetero_graph_with_features_datatype.pt"
+_MAPPINGS_FILE = (
+    f"{_DATA_ROOT}/26.03/progression/temporal_graph_datatype_mappings.pt"
+)
 
 
 DEFAULT_RUNS: dict[str, str] = {
@@ -494,8 +508,8 @@ def evaluate(
     only: str | None = None,
     results_dir: str = f"{Path(__file__).parent}/advancement_data/results/external",
     inject: list[dict] | None = None,
-    graph_file: str = "/gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype.pt",
-    mappings_file: str = "/gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_mappings.pt",
+    graph_file: str = _GRAPH_FILE,
+    mappings_file: str = _MAPPINGS_FILE,
 ):
     """
     Evaluate model predictions against the saved evaluation dataset.
@@ -2014,8 +2028,8 @@ def _summarise_centrality_groups(split_points: pd.DataFrame,
 
 
 def inflation_analysis(
-    graph_file: str = "/gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype.pt",
-    mappings_file: str = "/gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_mappings.pt",
+    graph_file: str = _GRAPH_FILE,
+    mappings_file: str = _MAPPINGS_FILE,
     out_dir: str = f"{Path(__file__).parent}/advancement_data/results/inflation",
     split: str = "first",
     compute_centrality: bool = True,
