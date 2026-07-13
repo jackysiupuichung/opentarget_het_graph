@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH -J st_k30_sum_h128
 #SBATCH -o %x.o%j
-#SBATCH -p gpushort
-#SBATCH -A pilot
+#SBATCH -p sae
+#SBATCH -A pilot_sae_gpu
 #SBATCH -n 8
 #SBATCH --cpus-per-gpu=8
-#SBATCH -t 1:0:0
+#SBATCH -t 240:0:0
 #SBATCH --mem-per-cpu=11G
 #SBATCH --gres=gpu:nvidia_a100_80gb_pcie:1
 

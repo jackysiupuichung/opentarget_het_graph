@@ -120,6 +120,15 @@ class ExplainRuntime:
         if latest_edge_only:
             model.encoder.latest_edge_only = False
 
+        # STRICT_BEFORE=1 shifts the label time down by one year so the loader's
+        # `edge_time <= edge_label_time` becomes `edge_time < transition_year`
+        # (the strict future-link-prediction window). SIMULATION ONLY on a model
+        # trained under <= — it previews how the explanation subgraph/paths change
+        # when same-year edges are masked out, NOT a retrained model.
+        import os as _os
+        _shift = 1 if _os.environ.get("STRICT_BEFORE") else 0
+        test_times = edge_time[test_mask] - _shift
+
         return cls(
             cfg=cfg, model=model, context=context, device=device,
             edge_feat_cols=list(cfg.model.get("edge_feat_cols", [0, 1])),
@@ -127,7 +136,7 @@ class ExplainRuntime:
             mappings=mappings, id_maps=id_maps,
             test_edge_index=edge_index[:, test_mask],
             test_edge_labels=edge_attr[test_mask, 0],
-            test_edge_times=edge_time[test_mask],
+            test_edge_times=test_times,
             latest_edge_only=latest_edge_only,
         )
 

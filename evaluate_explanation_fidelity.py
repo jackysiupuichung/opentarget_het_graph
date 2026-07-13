@@ -201,6 +201,9 @@ def main(args: argparse.Namespace) -> None:
     rows: List[dict] = []
     for bi, batch in enumerate(loader):
         batch = batch.to(rt.device)
+        # Align the explainer's edge universe with the model's post-collapse
+        # messages when latest_edge_only is set (no-op otherwise).
+        batch = rt.collapse_batch(batch)
         etd = build_edge_time_dict(batch, ADV_ETYPE)
         t_id, d_id = rt.pair_ids(batch)
 

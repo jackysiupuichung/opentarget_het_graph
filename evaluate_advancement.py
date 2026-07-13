@@ -568,6 +568,9 @@ def evaluate(
         # Official grouped 5-seed ensemble (headline model) — display as EAHGT
         "grouped_ensemble_latest_s5": "EAHGT",
         "grouped_ensemble_s5":        "EAHGT",
+        # Masking-comparison: strict (< year) vs loose (<= year) ensembles
+        "grouped_ensemble_strictmask_s5": "EAHGT-strict",
+        "grouped_ensemble_loose_s5":      "EAHGT-loose",
         # Matched-recipe ablation ensembles (same recipe as p3_eahgt_both)
         "abl_score_ens":          "EAHGT-score",
         "abl_novelty_ens":        "EAHGT-novelty",
@@ -602,7 +605,7 @@ def evaluate(
     # then tabular / heuristic baselines. Applied to slug_colors (insertion
     # order = legend order in plotnine) and to model_order downstream.
     _CANONICAL_SLUG_ORDER = [
-        "EAHGT", "EAHGT-Bilinear", "EAHGT-score", "EAHGT-novelty",
+        "EAHGT", "EAHGT-strict", "EAHGT-loose", "EAHGT-Bilinear", "EAHGT-score", "EAHGT-novelty",
         # 23.06 EAHGT variations
         "EAHGT-MLP", "EAHGT-Grouped", "EAHGT-leakfix", "EAHGT-LR-v2",
         "EAHGT-raw", "EAHGT-mean-ctr", "EAHGT-mean-std",
@@ -643,7 +646,7 @@ def evaluate(
     # variants alongside the OTS / RDG reference baselines. The full model
     # comparison (HGT, GATv2, R-GCN, CompGCN, …) is relegated to a separate
     # "*_supp.png" version of each line plot for the supplementary material.
-    _HEADLINE_SLUGS = ["EAHGT", "EAHGT-score", "EAHGT-novelty", "RDG", "OTS"]
+    _HEADLINE_SLUGS = ["EAHGT", "EAHGT-strict", "EAHGT-loose", "EAHGT-score", "EAHGT-novelty", "RDG", "OTS"]
     # Line style per slug: EAHGT solid, its two variants dashed/dotted (same
     # colour), everything else solid. Used via a linetype aesthetic so the
     # legend carries the style too.

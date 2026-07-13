@@ -22,15 +22,18 @@ CFG_DIR = Path(__file__).resolve().parent
 SCRIPTS_DIR = REPO / "scripts" / "advancement_prediction" / "strict_ta_sweep"
 SCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
 
-SRC = REPO / "config" / "experiments" / "lr_grouped_k100_strictmask" / "strictmask_s42.yaml"
+# Base recipe: the committed k10/mean/h128 sweep config is self-contained and
+# carries every field patch() rewrites (former lr_grouped_k100_strictmask base
+# is no longer on disk). patch() is idempotent, so re-patching it is safe.
+SRC = CFG_DIR / "st_k10_mean_h128.yaml"
 OUTPUT_ROOT = "/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/strict_ta_sweep"
 
 NDCG_KS = [10, 30]
 REDUCTIONS = ["sum", "mean"]
 # capacity/reg variants: (hidden_dim, dropout, decoder_dropout, tag)
+# h256 dropped: OOMs even on the 80GB A100 (needs batch/grad-accum rework).
 CAPS = [
     (128, 0.1, 0.1, "h128"),
-    (256, 0.1, 0.1, "h256"),
     (128, 0.2, 0.2, "h128do2"),
 ]
 
@@ -63,11 +66,11 @@ SBATCH_TMPL = """\
 #!/bin/bash
 #SBATCH -J {name}
 #SBATCH -o %x.o%j
-#SBATCH -p gpushort
-#SBATCH -A pilot
+#SBATCH -p sae
+#SBATCH -A pilot_sae_gpu
 #SBATCH -n 8
 #SBATCH --cpus-per-gpu=8
-#SBATCH -t 1:0:0
+#SBATCH -t 240:0:0
 #SBATCH --mem-per-cpu=11G
 #SBATCH --gres=gpu:nvidia_a100_80gb_pcie:1
 

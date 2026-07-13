@@ -489,7 +489,7 @@ def main(cfg):
         "primary_tas_json",
         repo_root / "advancement_data/results/primary_therapeutic_areas.json",
     ))
-    ta_by_disease_idx, primary_tas = None, None
+    ta_by_disease_idx, group_tas, primary_tas = None, None, None
     _group_all_tas = bool(cfg.train.get("lambdarank", {}).get("group_all_tas", False))
     if Path(ta_parquet_path).exists() and Path(primary_tas_json_path).exists():
         mappings_for_ta = torch.load(cfg.data.mappings_file, weights_only=False)

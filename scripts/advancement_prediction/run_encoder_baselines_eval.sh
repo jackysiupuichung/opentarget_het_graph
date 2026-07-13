@@ -22,6 +22,7 @@ python scripts/advancement_prediction/build_encoder_baseline_ensembles.py
 # is a fire CLI with subcommands -> use `evaluate`, not a bare flag.
 python evaluate_advancement.py evaluate \
     --only enc_hgt_ens,enc_gatv2_ens,enc_rgcn_ens,enc_compgcn_ens,abl_score_ens,abl_novelty_ens,p3_eahgt_both \
+    --datasets_dir /gpfs/scratch/bty414/clinical_advancement_paper/data/datasets \
     --results_dir headline_results/full_ablation_eval
 
 echo "Done. Plots in headline_results/full_ablation_eval/plots/."
