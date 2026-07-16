@@ -1,0 +1,181 @@
+{
+  "@context": {
+    "@language": "en",
+    "@vocab": "https://schema.org/",
+    "citeAs": "cr:citeAs",
+    "column": "cr:column",
+    "conformsTo": "dct:conformsTo",
+    "cr": "http://mlcommons.org/croissant/",
+    "data": {"@id": "cr:data", "@type": "@json"},
+    "dataType": {"@id": "cr:dataType", "@type": "@vocab"},
+    "dct": "http://purl.org/dc/terms/",
+    "examples": {"@id": "cr:examples", "@type": "@json"},
+    "extract": "cr:extract",
+    "field": "cr:field",
+    "fileProperty": "cr:fileProperty",
+    "fileObject": "cr:fileObject",
+    "fileSet": "cr:fileSet",
+    "format": "cr:format",
+    "includes": "cr:includes",
+    "isLiveDataset": "cr:isLiveDataset",
+    "jsonPath": "cr:jsonPath",
+    "key": "cr:key",
+    "md5": "cr:md5",
+    "parentField": "cr:parentField",
+    "path": "cr:path",
+    "recordSet": "cr:recordSet",
+    "references": "cr:references",
+    "regex": "cr:regex",
+    "repeated": "cr:repeated",
+    "replace": "cr:replace",
+    "sc": "https://schema.org/",
+    "separator": "cr:separator",
+    "source": "cr:source",
+    "subField": "cr:subField",
+    "transform": "cr:transform"
+  },
+  "@type": "sc:Dataset",
+  "conformsTo": "http://mlcommons.org/croissant/1.0",
+  "name": "THBKG",
+  "description": "The Temporal Heterogeneous Biomedical Knowledge Graph (THBKG): a biomedical knowledge graph in which every edge is dated by the year its evidence first appeared, enabling as-of queries that reconstruct a target-disease pair's evidence profile exactly as it stood at any historical decision point. Derived from Open Targets release 26.03, Reactome, ChEMBL, and ClinicalTrials.gov. Ships a leak-free clinical-advancement benchmark: each pair is scored only from evidence datable strictly before its Phase II transition year. Nodes: 110,396 across five types (target, disease, molecule, Gene Ontology term, Reactome pathway); ~11.1M edges across nineteen context relations (sixteen temporal, three static); 28,795 target-disease advancement labels split temporally into 21,602 training and 7,193 evaluation pairs (w3 window).",
+  "version": "26.03",
+  "license": "https://creativecommons.org/licenses/by/4.0/",
+  "url": "https://github.com/jackysiupuichung/opentarget_het_graph",
+  "sameAs": "https://doi.org/10.5281/zenodo.20795232",
+  "citeAs": "Siu, Cabrera, Mudaliar, and Zubiaga. THBKG: A Temporal Biomedical Knowledge Graph for Leak-Free Clinical Advancement Prediction.",
+  "keywords": [
+    "temporal knowledge graph",
+    "biomedical knowledge graph",
+    "decision-aligned evaluation",
+    "temporal data leakage",
+    "clinical trial prediction",
+    "drug target identification"
+  ],
+  "isLiveDataset": true,
+  "creator": {
+    "@type": "sc:Organization",
+    "name": "Queen Mary University of London; Recursion Pharmaceuticals"
+  },
+  "distribution": [
+    {
+      "@type": "cr:FileObject",
+      "@id": "github-repo",
+      "name": "github-repo",
+      "description": "THBKG source repository: construction pipeline, benchmark splits, and evaluation harness.",
+      "contentUrl": "https://github.com/jackysiupuichung/opentarget_het_graph/tree/v26.03",
+      "encodingFormat": "git+https",
+      "sha256": "main"
+    },
+    {
+      "@type": "cr:FileObject",
+      "@id": "graph-pt",
+      "name": "hetero-graph",
+      "description": "PyTorch-Geometric HeteroData object: the assembled temporal heterogeneous graph with node features and dated, feature-carrying edges (26.03, w3 advancement labels).",
+      "containedIn": {"@id": "github-repo"},
+      "contentUrl": "graph/hetero_graph_with_features_datatype_w3.pt",
+      "encodingFormat": "application/octet-stream"
+    },
+    {
+      "@type": "cr:FileObject",
+      "@id": "train-split",
+      "name": "train-split",
+      "description": "Advancement labels for the training set (pairs entering Phase II 1995-2015).",
+      "containedIn": {"@id": "github-repo"},
+      "contentUrl": "data/clinical_trial_advancement/26.03_w3/train_dataset.csv",
+      "encodingFormat": "text/csv"
+    },
+    {
+      "@type": "cr:FileObject",
+      "@id": "eval-split",
+      "name": "eval-split",
+      "description": "Advancement labels for the held-out evaluation set (pairs entering Phase II 2016-2021; w3 window). N=7,193, 9.29% positive.",
+      "containedIn": {"@id": "github-repo"},
+      "contentUrl": "data/clinical_trial_advancement/26.03_w3/test_dataset.csv",
+      "encodingFormat": "text/csv"
+    }
+  ],
+  "recordSet": [
+    {
+      "@type": "cr:RecordSet",
+      "@id": "advancement_labels_train",
+      "name": "advancement_labels_train",
+      "description": "Training advancement labels: one row per target-disease pair entering Phase II in 1995-2015.",
+      "key": {"@id": "advancement_labels_train/target_id"},
+      "field": [
+        {
+          "@type": "cr:Field",
+          "@id": "advancement_labels_train/target_id",
+          "name": "target_id",
+          "description": "Ensembl gene identifier of the target.",
+          "dataType": "sc:Text",
+          "source": {"fileObject": {"@id": "train-split"}, "extract": {"column": "target_id"}}
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "advancement_labels_train/disease_id",
+          "name": "disease_id",
+          "description": "EFO disease identifier.",
+          "dataType": "sc:Text",
+          "source": {"fileObject": {"@id": "train-split"}, "extract": {"column": "disease_id"}}
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "advancement_labels_train/transition_year",
+          "name": "transition_year",
+          "description": "Year the pair entered Phase II; the decision date at which the pair is scored on evidence dated strictly before it.",
+          "dataType": "sc:Integer",
+          "source": {"fileObject": {"@id": "train-split"}, "extract": {"column": "transition_year"}}
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "advancement_labels_train/outcome",
+          "name": "outcome",
+          "description": "True if a Phase III trial for the same target-disease pair was registered within three years of Phase II entry, else False.",
+          "dataType": "sc:Boolean",
+          "source": {"fileObject": {"@id": "train-split"}, "extract": {"column": "outcome"}}
+        }
+      ]
+    },
+    {
+      "@type": "cr:RecordSet",
+      "@id": "advancement_labels_eval",
+      "name": "advancement_labels_eval",
+      "description": "Held-out evaluation advancement labels (w3 window): one row per target-disease pair entering Phase II in 2016-2021. N=7,193, 9.29% positive.",
+      "key": {"@id": "advancement_labels_eval/target_id"},
+      "field": [
+        {
+          "@type": "cr:Field",
+          "@id": "advancement_labels_eval/target_id",
+          "name": "target_id",
+          "description": "Ensembl gene identifier of the target.",
+          "dataType": "sc:Text",
+          "source": {"fileObject": {"@id": "eval-split"}, "extract": {"column": "target_id"}}
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "advancement_labels_eval/disease_id",
+          "name": "disease_id",
+          "description": "EFO disease identifier.",
+          "dataType": "sc:Text",
+          "source": {"fileObject": {"@id": "eval-split"}, "extract": {"column": "disease_id"}}
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "advancement_labels_eval/transition_year",
+          "name": "transition_year",
+          "description": "Year the pair entered Phase II; the decision date at which the pair is scored on evidence dated strictly before it.",
+          "dataType": "sc:Integer",
+          "source": {"fileObject": {"@id": "eval-split"}, "extract": {"column": "transition_year"}}
+        },
+        {
+          "@type": "cr:Field",
+          "@id": "advancement_labels_eval/outcome",
+          "name": "outcome",
+          "description": "True if a Phase III trial for the same target-disease pair was registered within three years of Phase II entry, else False.",
+          "dataType": "sc:Boolean",
+          "source": {"fileObject": {"@id": "eval-split"}, "extract": {"column": "outcome"}}
+        }
+      ]
+    }
+  ]
+}
