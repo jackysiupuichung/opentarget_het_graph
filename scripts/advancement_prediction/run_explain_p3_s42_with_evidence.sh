@@ -17,10 +17,10 @@ cd "$REPO_ROOT"
 source .venv/bin/activate
 export WANDB_MODE="disabled"
 
-RUN_DIR=/gpfs/scratch/bty414/opentarget_evidences/23.06/runs/headline/p3_eahgt_both_s42
+RUN_DIR=/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/headline/p3_eahgt_both_s42
 OUT_DIR=$REPO_ROOT/headline_results/evaluate_advancement/explanations_with_evidence
 PAIRS=$REPO_ROOT/headline_results/evaluate_advancement/explanations_evidence_free/pairs.csv
-RAW_EDGES_DIR=/gpfs/scratch/bty414/opentarget_evidences/23.06/evidences/edges
+RAW_EDGES_DIR=/gpfs/scratch/bty414/opentarget_evidences/26.03/evidences/edges
 
 mkdir -p "$OUT_DIR"
 

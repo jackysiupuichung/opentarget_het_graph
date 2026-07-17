@@ -30,7 +30,11 @@ REPO_ROOT  = Path(__file__).resolve().parents[3]
 CONFIG_DIR = REPO_ROOT / "config" / "experiments" / "v4_ablation"
 SCRIPT_DIR = REPO_ROOT / "scripts" / "advancement_prediction" / "v4_ablation"
 V3_CONFIG_DIR = REPO_ROOT / "config" / "experiments"
-RUNS_BASE = "/gpfs/scratch/bty414/opentarget_evidences/23.06/runs/v4_ablation"
+RUNS_BASE = "/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/v4_ablation"
+# 26.03 w3 graph generation (23.06 retired for the same-year trial-edge leak).
+# The v3 base configs still carry 23.06 paths; the override below overwrites them.
+W3_GRAPH = "/gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype_w3.pt"
+W3_MAP   = "/gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_w3_mappings.pt"
 
 VARIANTS = [
     # (slug, source v3 config stem, gres)
@@ -52,6 +56,8 @@ def make_override(slug: str, seed: int) -> dict:
         "seed": seed,
         "experiment": {"name": f"{slug}_v4_s{seed}"},
         "data": {
+            "graph_file": W3_GRAPH,
+            "mappings_file": W3_MAP,
             "train_cutoff_year": 2010,
             "val_min_year": 2015,
             "val_max_year": 2015,

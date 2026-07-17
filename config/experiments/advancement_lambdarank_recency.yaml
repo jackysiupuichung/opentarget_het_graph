@@ -2,8 +2,8 @@ experiment:
   name: advancement_lambdarank_recency
 
 data:
-  graph_file: /gpfs/scratch/bty414/opentarget_evidences/25.03/graph/hetero_graph_with_features_datatype.pt
-  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/25.03/progression/temporal_graph_datatype_mappings.pt
+  graph_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype_w3.pt
+  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_w3_mappings.pt
 
 model:
   name: hgt
@@ -19,7 +19,7 @@ model:
   time_dim: 8
 
 train:
-  output_dir: /gpfs/scratch/bty414/opentarget_evidences/25.03/runs/advancement_lambdarank_recency
+  output_dir: /gpfs/scratch/bty414/opentarget_evidences/26.03/runs/advancement_lambdarank_recency
   num_epochs: 50
   lr: 0.0002880497839949814
   weight_decay: 2.141361368779832e-05

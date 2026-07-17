@@ -4,8 +4,8 @@
 experiment:
   name: b7_compgcn_headline_s7
 data:
-  graph_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/graph/hetero_graph_with_features_datatype.pt
-  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/progression/temporal_graph_datatype_mappings.pt
+  graph_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype_w3.pt
+  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_w3_mappings.pt
   undirected: true
   train_cutoff_year: 2010
   val_min_year: 2013
@@ -20,7 +20,7 @@ model:
   use_edge_features: false
   composition: sub
 train:
-  output_dir: /gpfs/scratch/bty414/opentarget_evidences/23.06/runs/headline/b7_compgcn_s7
+  output_dir: /gpfs/scratch/bty414/opentarget_evidences/26.03/runs/headline/b7_compgcn_s7
   num_epochs: 40
   lr: 0.0003481660303759135
   weight_decay: 0.0006458897131093361

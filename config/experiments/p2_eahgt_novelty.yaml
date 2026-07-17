@@ -2,8 +2,8 @@ experiment:
   name: p2_eahgt_novelty
 
 data:
-  graph_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype.pt
-  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_mappings.pt
+  graph_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype_w3.pt
+  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_w3_mappings.pt
   undirected: true
   # Canonical full-range temporal split: train <=2010, val 2011-2015, test >=2016
   train_cutoff_year: 2010

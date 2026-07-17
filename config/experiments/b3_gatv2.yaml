@@ -2,8 +2,8 @@ experiment:
   name: b3_gatv2
 
 data:
-  graph_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/graph/hetero_graph_with_features_datatype.pt
-  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/progression/temporal_graph_datatype_mappings.pt
+  graph_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype_w3.pt
+  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_w3_mappings.pt
   undirected: true
 
 # HPs from b3_gatv2_tune sweep (W&B sweep 8e4lgy4b, best trial crisp-sweep-6):
@@ -18,7 +18,7 @@ model:
   edge_feat_dim: 0
 
 train:
-  output_dir: /gpfs/scratch/bty414/opentarget_evidences/23.06/runs/b3_gatv2_lambdarank_v2
+  output_dir: /gpfs/scratch/bty414/opentarget_evidences/26.03/runs/b3_gatv2_lambdarank_v2
   num_epochs: 50
   lr: 0.0009511974905423232
   weight_decay: 0.0011653823378934012

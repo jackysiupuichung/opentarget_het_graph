@@ -28,10 +28,17 @@ ARCHS = {
     "p3_eahgt_both": "p3_eahgt_both_s7.yaml",
 }
 SEEDS = [1, 7, 42]
-OUTPUT_ROOT = "/gpfs/scratch/bty414/opentarget_evidences/23.06/runs/headline"
+OUTPUT_ROOT = "/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/headline"
+# 26.03 w3 graph generation (the 23.06 generation had a same-year clinical-trial
+# edge leak and is retired). The v4 base configs still carry 23.06 paths, so we
+# overwrite graph_file/mappings_file here rather than inherit them.
+W3_GRAPH = "/gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype_w3.pt"
+W3_MAP   = "/gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_w3_mappings.pt"
 
 
 def patch(text: str, arch: str, seed: int) -> str:
+    text = re.sub(r"graph_file: .*", f"graph_file: {W3_GRAPH}", text)
+    text = re.sub(r"mappings_file: .*", f"mappings_file: {W3_MAP}", text)
     text = re.sub(r"experiment:\n  name: .*",
                   f"experiment:\n  name: {arch}_headline_s{seed}", text)
     text = re.sub(r"val_min_year: \d+", "val_min_year: 2013", text)

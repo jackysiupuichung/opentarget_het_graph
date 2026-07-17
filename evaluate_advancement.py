@@ -45,10 +45,10 @@ logger = logging.getLogger(__name__)
 _DATA_ROOT = os.environ.get(
     "THBKG_DATA_ROOT", "/gpfs/scratch/bty414/opentarget_evidences"
 )
-_SCRATCH = f"{_DATA_ROOT}/23.06/runs"
-# EAHGT ablation (Study B) was migrated to the 26.03 graph generation, which
-# reproduces the evaluation_dataset.zarr test pairs 9094/9094 and carries both
-# advancement edge features (score + novelty). Other models stay on 23.06.
+# All canonical runs live on the 26.03 graph generation, which reproduces the
+# evaluation_dataset.zarr test pairs 9094/9094 and carries both advancement edge
+# features (score + novelty). The 23.06 generation had a same-year clinical-trial
+# edge leak and is retired — do not repoint anything at it.
 _SCRATCH_2603 = f"{_DATA_ROOT}/26.03/runs"
 # Canonical 26.03 graph + node mappings (overridable per call via --graph_file /
 # --mappings_file, or globally via THBKG_DATA_ROOT).
@@ -61,17 +61,14 @@ _MAPPINGS_FILE = (
 DEFAULT_RUNS: dict[str, str] = {
     # p3_lambdarank: directed graph (canonical)
     "p3_lambdarank_directed": "runs/advancement_lambdarank",
-    # Undirected experiments (same base HP as v1, varying dropout and early-stop/ndcg_k)
-    "undirected_v1": f"{_SCRATCH}/advancement_lambdarank_undirected_v1",  # dropout=0.2, ndcg_k=50,  metric=ndcg@10
-    "unidirected_additive": f"{_SCRATCH}/advancement_lambdarank_undirected_v1_additive",  # dropout=0.2, ndcg_k=50,  metric=ndcg@10
-    "undirected_v2": f"{_SCRATCH}/advancement_lambdarank_undirected_v2",  # dropout=0.3, ndcg_k=50,  metric=ndcg@50
-    "undirected_v3": f"{_SCRATCH}/advancement_lambdarank_undirected_v3",  # dropout=0.3, ndcg_k=100, metric=ndcg@100
-    "undirected_v4": f"{_SCRATCH}/advancement_lambdarank_undirected_v4",  # dropout=0.4, ndcg_k=50,  metric=ndcg@50
-    # Study A — Model comparison (no edge features; per-encoder tuned)
-    "b1_hgt":           f"{_SCRATCH}/b1_hgt_lambdarank_v2",
-    "b3_gatv2":         f"{_SCRATCH}/b3_gatv2_lambdarank_v2",
-    "b6_rgcn":          f"{_SCRATCH}/b6_rgcn_lambdarank_v2",
-    "b7_compgcn":       f"{_SCRATCH}/b7_compgcn_lambdarank_v2",
+    # Study A — Model comparison (no edge features). The per-encoder baselines are
+    # the 5-seed rank-fused 26.03 ensembles (same dirs as enc_*_ens below); the
+    # b* aliases are kept so the headline analysis scripts that key on these slugs
+    # keep resolving.
+    "b1_hgt":           f"{_SCRATCH_2603}/encoder_baselines/hgt/ensemble",
+    "b3_gatv2":         f"{_SCRATCH_2603}/encoder_baselines/gatv2/ensemble",
+    "b6_rgcn":          f"{_SCRATCH_2603}/encoder_baselines/rgcn/ensemble",
+    "b7_compgcn":       f"{_SCRATCH_2603}/encoder_baselines/compgcn/ensemble",
     # Study B — EAHGT ablation (HGT + edge feature variants; canonical HPs)
     "p1_eahgt_score":   f"{_SCRATCH_2603}/p1_eahgt_score_grouped_ap_v3",
     "p2_eahgt_novelty": f"{_SCRATCH_2603}/p2_eahgt_novelty_grouped_ap_v3",
@@ -85,8 +82,8 @@ DEFAULT_RUNS: dict[str, str] = {
     "abl_score_ens":    f"{_SCRATCH_2603}/ablation_matched/score/ensemble",
     "abl_novelty_ens":  f"{_SCRATCH_2603}/ablation_matched/novelty/ensemble",
     # Encoder-family baselines: 5-seed rank-fused ensembles, each encoder at its
-    # individual best 23.06 params, under the headline grouped recipe.
-    # Built by build_encoder_baseline_ensembles.py.
+    # individual best params, under the headline grouped recipe (26.03 graph).
+    # Built by build_encoder_baseline_ensembles.py. Same dirs as the b* aliases.
     "enc_hgt_ens":      f"{_SCRATCH_2603}/encoder_baselines/hgt/ensemble",
     "enc_gatv2_ens":    f"{_SCRATCH_2603}/encoder_baselines/gatv2/ensemble",
     "enc_rgcn_ens":     f"{_SCRATCH_2603}/encoder_baselines/rgcn/ensemble",
@@ -241,6 +238,12 @@ def _collect_inject(
 ) -> list[dict]:
     """Resolve predictions from DEFAULT_RUNS into a flat inject list."""
     result = list(inject or [])
+
+    # When an explicit --inject list is given WITHOUT --only, evaluate exactly
+    # those models — do NOT also auto-load every DEFAULT_RUNS entry (that mixes
+    # unrelated runs onto the current zarr and can collide display slugs).
+    if inject and only is None:
+        return result
 
     runs = dict(DEFAULT_RUNS)
     if only is not None:
@@ -593,6 +596,19 @@ def evaluate(
         "enc_gatv2_ens":          "GATv2",
         "enc_rgcn_ens":           "R-GCN",
         "enc_compgcn_ens":        "CompGCN",
+        # w3 retrain (26.03 w3 labels): HGT + GATv2 edge-feature ablation.
+        # Distinct slugs so they don't collide with the _ens names under the
+        # 12-char truncation used for unmapped external models.
+        "enc_hgt_w3":             "HGT",
+        "enc_gatv2_w3":           "GATv2",
+        "enc_rgcn_w3":            "R-GCN",
+        "enc_compgcn_w3":         "CompGCN",
+        "abl_score_w3":           "EAHGT-score",
+        "abl_novelty_w3":         "EAHGT-novelty",
+        "p3_eahgt_both_w3":       "EAHGT",
+        "gatv2_score_w3":         "GATv2-score",
+        "gatv2_novelty_w3":       "GATv2-novelty",
+        "gatv2_both_w3":          "GATv2-both",
         # Bilinear-decoder variant (collapse-resistant; reported alongside MLP)
         "p3_eahgt_both_bilinear": "EAHGT-Bilinear",
         # 23.06 EAHGT variations (decoder / loss / centering / training)
@@ -623,7 +639,9 @@ def evaluate(
         # 23.06 EAHGT variations
         "EAHGT-MLP", "EAHGT-Grouped", "EAHGT-leakfix", "EAHGT-LR-v2",
         "EAHGT-raw", "EAHGT-mean-ctr", "EAHGT-mean-std",
-        "HGT", "GATv2", "R-GCN", "CompGCN",
+        "HGT",
+        "GATv2", "GATv2-score", "GATv2-novelty", "GATv2-both",
+        "R-GCN", "CompGCN",
         "RDG", "GBM", "OTS",
         "Random",
     ]
@@ -643,30 +661,66 @@ def evaluate(
     all_model_names = ordered_names
     color_map  = _build_color_map(all_model_names)
     slug_colors = {model_display.get(m, m): color_map[m] for m in all_model_names}
-    # EAHGT ablation variants share the EAHGT colour and are distinguished only
-    # by line style (see _SLUG_LINETYPES). This keeps the headline line plots
-    # reading "one model family, three configurations" rather than three
-    # unrelated curves.
-    for _variant_slug in ("EAHGT-score", "EAHGT-novelty"):
-        if "EAHGT" in slug_colors and _variant_slug in slug_colors:
-            slug_colors[_variant_slug] = slug_colors["EAHGT"]
+    # EAHGT ablation variants keep the EAHGT hue but are drawn a progressively
+    # LIGHTER shade (tinted toward white), so they read as "one model family,
+    # several configurations" while staying distinguishable. Colour is the sole
+    # per-model channel across every plot (lines, violins/boxes, heatmaps); no
+    # linetype aesthetic is used.
+    import matplotlib.colors as mcolors
+    def _lighten(hex_color, amount):
+        """Blend `hex_color` toward white by `amount` in [0, 1]."""
+        rgb = mcolors.to_rgb(hex_color)
+        return tuple(c + (1.0 - c) * amount for c in rgb)
+
+    # Per-family: base slug -> {variant slug: tint amount toward white}. Each
+    # family's variants share the base hue and separate only by shade.
+    _FAMILY_VARIANT_TINTS = {
+        "EAHGT": {
+            "EAHGT-strict":  0.30,
+            "EAHGT-loose":   0.45,
+            "EAHGT-score":   0.30,
+            "EAHGT-novelty": 0.50,
+        },
+        "GATv2": {
+            "GATv2-score":   0.30,
+            "GATv2-novelty": 0.50,
+            "GATv2-both":    0.15,
+        },
+    }
+    # Flat slug -> (base, amount) lookup for the color_map propagation below.
+    _VARIANT_TINTS = {
+        v: (base, amt)
+        for base, variants in _FAMILY_VARIANT_TINTS.items()
+        for v, amt in variants.items()
+    }
+    for _base, _variants in _FAMILY_VARIANT_TINTS.items():
+        if _base not in slug_colors:
+            continue
+        for _variant_slug, _amt in _variants.items():
+            if _variant_slug in slug_colors:
+                slug_colors[_variant_slug] = _lighten(slug_colors[_base], _amt)
+    # Propagate the same tint to color_map (keyed by model NAME, not slug) so
+    # the heatmaps — which build per-model colormaps from color_map — also
+    # differentiate variants by shade.
+    for _name in all_model_names:
+        _tint = _VARIANT_TINTS.get(model_display.get(_name))
+        if _tint is not None:
+            _base, _amt = _tint
+            if _base in slug_colors:
+                color_map[_name] = _lighten(slug_colors[_base], _amt)
     # Helper: make model_slug an ordered categorical so plotnine renders the
     # legend in canonical order (EAHGT first, baselines last).
     _slug_categories = list(slug_colors.keys())
     def _as_ordered_slug(s):
         return pd.Categorical(s, categories=_slug_categories, ordered=True)
 
-    # Headline line plots show only the proposed model + its two ablation
-    # variants alongside the OTS / RDG reference baselines. The full model
-    # comparison (HGT, GATv2, R-GCN, CompGCN, …) is relegated to a separate
-    # "*_supp.png" version of each line plot for the supplementary material.
-    _HEADLINE_SLUGS = ["EAHGT", "EAHGT-strict", "EAHGT-loose", "EAHGT-score", "EAHGT-novelty", "RDG", "OTS"]
-    # Line style per slug: EAHGT solid, its two variants dashed/dotted (same
-    # colour), everything else solid. Used via a linetype aesthetic so the
-    # legend carries the style too.
-    _SLUG_LINETYPES = {s: "solid" for s in _slug_categories}
-    _SLUG_LINETYPES["EAHGT-score"]   = "dashed"
-    _SLUG_LINETYPES["EAHGT-novelty"] = "dotted"
+    # Headline line/violin plots show one representative per encoder family — the
+    # family's best-scoring configuration by TA-mean RS@10 — alongside the OTS /
+    # RDG reference baselines. This is COMPUTED from the eval below (see
+    # `_HEADLINE_SLUGS = _select_headline_slugs(...)` after rs_by_ta_primary is
+    # built), not hand-maintained, so the headline always reflects the current
+    # run. This placeholder is only a fallback if that selection can't run.
+    _HEADLINE_SLUGS = ["EAHGT", "EAHGT-novelty", "GATv2-both", "RDG", "OTS"]
 
     # ------------------------------------------------------------------
     # Test-pair stratification (target novelty × evidence sparsity)
@@ -797,6 +851,34 @@ def evaluate(
         .groupby(["model_name", "model_slug", "limit"], as_index=False)
         .agg(relative_success=("relative_success", "mean"))
     )
+
+    # Headline model selection: best-scoring configuration PER ENCODER FAMILY.
+    # Families are keyed by the slug prefix before the first "-" (EAHGT, GATv2,
+    # HGT, R-GCN, …); within each, the config with the highest TA-mean RS@10
+    # wins. We keep the top `n_families` families (by their best score) plus the
+    # RDG / OTS reference baselines. Result: an honest architecture comparison
+    # (one representative per encoder) rather than a hand-picked whitelist.
+    _REFERENCE_SLUGS = ["RDG", "OTS"]
+    def _select_headline_slugs(rs_df: pd.DataFrame, n_families: int = 2,
+                               rank_limit: int = 10) -> list[str]:
+        at = rs_df[rs_df["limit"] == rank_limit]
+        if at.empty:
+            return _HEADLINE_SLUGS  # fall back to the placeholder
+        score = at.groupby("model_slug")["relative_success"].mean()
+        fam = {}  # family -> (best_slug, best_score)
+        for slug, s in score.items():
+            if slug in _REFERENCE_SLUGS or pd.isna(slug):
+                continue
+            family = str(slug).split("-", 1)[0]
+            if family not in fam or s > fam[family][1]:
+                fam[family] = (slug, s)
+        top = sorted(fam.values(), key=lambda t: t[1], reverse=True)[:n_families]
+        chosen = [slug for slug, _ in top]
+        chosen += [r for r in _REFERENCE_SLUGS if r in set(rs_df["model_slug"])]
+        return chosen
+
+    _HEADLINE_SLUGS = _select_headline_slugs(rs_by_limit)
+    logger.info(f"Headline models (best per encoder family + refs): {_HEADLINE_SLUGS}")
 
     # Stratified rs_by_limit (mean over primary TAs per stratum) — kept for the
     # CSV / TA-mean consumers.
@@ -967,13 +1049,12 @@ def evaluate(
     def _build_pooled_plot(rs_df: pd.DataFrame, ci_df: pd.DataFrame) -> pn.ggplot:
         """Pooled RS-vs-N plot for the given subset of models.
 
-        Variant curves (EAHGT-score / EAHGT-novelty) share the EAHGT colour and
-        are separated by a linetype aesthetic; the legend folds both colour and
-        linetype into a single per-model key.
+        Every model is drawn as a solid line; colour alone carries the per-model
+        distinction (including the EAHGT variants, which share a colour family).
         """
         _slugs = [s for s in _slug_categories if s in set(rs_df["model_slug"])]
         return (
-            pn.ggplot(rs_df, pn.aes(x="limit", y="relative_success", color="model_slug", fill="model_slug", linetype="model_slug", group="model_slug"))
+            pn.ggplot(rs_df, pn.aes(x="limit", y="relative_success", color="model_slug", fill="model_slug", group="model_slug"))
             + pn.geom_ribbon(
                 data=ci_df,
                 mapping=pn.aes(x="limit", ymin="relative_success_low_smooth", ymax="relative_success_high_smooth", fill="model_slug", group="model_slug"),
@@ -999,10 +1080,9 @@ def evaluate(
             + pn.annotate("text", x=_pct2, y=_rs_plot_max, label=f"Top 2%\n(n={_pct2})", size=7, ha="center", va="top", color="grey")
             + pn.scale_color_manual(values=slug_colors, breaks=_slugs)
             + pn.scale_fill_manual(values=slug_colors, breaks=_slugs)
-            + pn.scale_linetype_manual(values=_SLUG_LINETYPES, breaks=_slugs)
             + pn.scale_x_continuous(limits=(0, _max_limit_plot))
             + pn.scale_y_continuous(limits=(0, _rs_plot_max), oob=mizani.bounds.squish)
-            + pn.labs(x="N top target-disease pairs", y="relative success", color="model", fill="model", linetype="model")
+            + pn.labs(x="N top target-disease pairs", y="relative success", color="model", fill="model")
             + pn.theme_minimal()
             + pn.theme(figure_size=(10, 4))
         )
@@ -1031,7 +1111,7 @@ def evaluate(
     def _build_mor_plot(rs_df: pd.DataFrame) -> pn.ggplot:
         _slugs = [s for s in _slug_categories if s in set(rs_df["model_slug"])]
         return (
-            pn.ggplot(rs_df, pn.aes(x="limit", y="relative_success", color="model_slug", fill="model_slug", linetype="model_slug", group="model_slug"))
+            pn.ggplot(rs_df, pn.aes(x="limit", y="relative_success", color="model_slug", fill="model_slug", group="model_slug"))
             + pn.geom_point(alpha=0.3, size=1, show_legend=False)
             + pn.geom_line(pn.aes(y="relative_success_smooth"), size=1, alpha=0.8)
             + pn.geom_hline(yintercept=1, linetype="dashed")
@@ -1042,10 +1122,9 @@ def evaluate(
             + pn.annotate("text", x=_pct2, y=_rs_mor_plot_max, label=f"Top 2%\n(n={_pct2})", size=7, ha="center", va="top", color="grey")
             + pn.scale_color_manual(values=slug_colors, breaks=_slugs)
             + pn.scale_fill_manual(values=slug_colors, breaks=_slugs)
-            + pn.scale_linetype_manual(values=_SLUG_LINETYPES, breaks=_slugs)
             + pn.scale_x_continuous(limits=(0, _max_limit_plot))
             + pn.scale_y_continuous(limits=(0, _rs_mor_plot_max), oob=mizani.bounds.squish)
-            + pn.labs(x="N top target-disease pairs (per therapeutic area)", y="mean relative success across TAs", color="model", fill="model", linetype="model")
+            + pn.labs(x="N top target-disease pairs (per therapeutic area)", y="mean relative success across TAs", color="model", fill="model")
             + pn.theme_minimal()
             # (a) is wider than the boxplot (b). Paired with LaTeX widths of
             # 0.62/0.38 textwidth, the ~1.6x wider aspect keeps the two panels
@@ -1073,23 +1152,34 @@ def evaluate(
         id_vars=["model_slug", "therapeutic_area_name"], value_vars=["roc_auc", "average_precision", "mcc"],
         var_name="metric", value_name="value"
     )
+    def _build_cm_ta_plot(df: pd.DataFrame) -> pn.ggplot:
+        _slugs = [s for s in _slug_categories if s in set(df["model_slug"])]
+        return (
+            pn.ggplot(df, pn.aes(x="model_slug", y="value", fill="model_slug"))
+            + pn.geom_violin(alpha=0.55, scale="width", width=0.8, color="none")
+            + pn.geom_boxplot(width=0.12, alpha=0.7, outlier_alpha=0.0, color="black")
+            + pn.geom_jitter(width=0.12, size=1.0, alpha=0.45, color="black", show_legend=False)
+            + pn.facet_wrap("~ metric", scales="free_y", ncol=1)
+            + pn.scale_fill_manual(values=slug_colors, breaks=_slugs)
+            + pn.labs(x="", y="", fill="model")
+            + pn.theme_minimal()
+            # Stacked metric facets (ncol=1) keep the panel tall and narrow so it
+            # aligns in height with the wider line plot at 0.38 textwidth.
+            # Model identity is carried by the fill legend, so drop the redundant
+            # model names on the x-axis.
+            + pn.theme(figure_size=(5, 5), legend_position="right",
+                       axis_text_x=pn.element_blank(),
+                       axis_ticks_major_x=pn.element_blank())
+        )
+
+    # Headline: the same best-per-family models as the RS plots; full set in supp.
     _save_plot(
-        pn.ggplot(cm_ta_melt, pn.aes(x="model_slug", y="value", fill="model_slug"))
-        + pn.geom_violin(alpha=0.55, scale="width", width=0.8, color="none")
-        + pn.geom_boxplot(width=0.12, alpha=0.7, outlier_alpha=0.0, color="black")
-        + pn.geom_jitter(width=0.12, size=1.0, alpha=0.45, color="black", show_legend=False)
-        + pn.facet_wrap("~ metric", scales="free_y", ncol=1)
-        + pn.scale_fill_manual(values=slug_colors, breaks=_slug_categories)
-        + pn.labs(x="", y="", fill="model")
-        + pn.theme_minimal()
-        # Stacked metric facets (ncol=1) keep the panel tall and narrow so it
-        # aligns in height with the wider line plot at 0.38 textwidth.
-        # Model identity is carried by the fill legend, so drop the redundant
-        # model names on the x-axis.
-        + pn.theme(figure_size=(5, 5), legend_position="right",
-                   axis_text_x=pn.element_blank(),
-                   axis_ticks_major_x=pn.element_blank()),
+        _build_cm_ta_plot(cm_ta_melt[cm_ta_melt["model_slug"].isin(_HEADLINE_SLUGS)].copy()),
         plots_dir / "classification_metrics_by_ta.png",
+    )
+    _save_plot(
+        _build_cm_ta_plot(cm_ta_melt),
+        plots_dir / "classification_metrics_by_ta_supp.png",
     )
 
     # Plot 3b: MCC per model (overall, stratum='all', TA='all')
@@ -1153,13 +1243,6 @@ def evaluate(
     import matplotlib.pyplot as plt
     import matplotlib.colors as mcolors
 
-    n_rows, n_cols = rs_pivot.shape
-    fig_h = max(5, n_rows * 0.45 + 1.5)
-    fig_w = max(6, n_cols * 1.2 + 2.5)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    fig.patch.set_facecolor("white")
-    ax.set_aspect("auto")
-
     # Per-model colormap (white -> line-plot color) with per-model RS normalization.
     # No legend — intensity is visual only.
     per_model_cmaps = {
@@ -1182,58 +1265,91 @@ def evaluate(
             vmin_m, vmax_m = 0.0, 1.0
         per_model_norms[m] = mcolors.Normalize(vmin=vmin_m, vmax=vmax_m)
 
-    for row_i, ta in enumerate(ta_order):
-        for col_i, (model_name, limit) in enumerate(col_order):
-            rs_val = rs_pivot.loc[ta, (model_name, limit)] if (model_name, limit) in rs_pivot.columns else np.nan
-            cmap_m = per_model_cmaps[model_name]
-            norm_m = per_model_norms[model_name]
-            color  = cmap_m(norm_m(rs_val)) if pd.notna(rs_val) else (0.85, 0.85, 0.85, 1)
-            rect   = plt.Rectangle([col_i, row_i], 1, 1, color=color)
-            ax.add_patch(rect)
-            if pd.notna(rs_val):
-                ax.text(col_i + 0.5, row_i + 0.5, f"{rs_val:.2f}",
-                        ha="center", va="center", fontsize=8, fontweight="bold")
+    def _render_stacked_heatmap(pivot, models, limits, row_order, row_labels,
+                                out_path, cell_getter, cell_color, cell_text,
+                                ncols_grid=3, group_seps=None):
+        """Render one small (row × limit) heatmap panel per model, laid out in a
+        grid (ncols_grid columns, wrapping down the page). Keeps each panel only
+        `len(limits)` cells wide so the whole figure stacks vertically and fits a
+        single page column instead of running off the right edge.
 
-    # Axis labels
-    ax.set_xlim(0, n_cols)
-    ax.set_ylim(0, n_rows)
-    ax.set_xticks([i + 0.5 for i in range(n_cols)])
-    ax.set_xticklabels(
-        [f"{model_display.get(m, m)}@{lim}" for m, lim in col_order],
-        rotation=90, ha="center", fontsize=9,
+        cell_getter(model, row, limit) -> raw value shown as text (RS).
+        cell_color(model, row, limit)  -> RGBA fill for the cell.
+        cell_text(model, row, limit)   -> list of (y_frac, string, fontsize) to draw.
+        """
+        n_panels = len(models)
+        ncol = min(ncols_grid, n_panels)
+        nrow = int(np.ceil(n_panels / ncol))
+        n_r, n_l = len(row_order), len(limits)
+        panel_w = n_l * 0.62 + 1.9   # room for the row labels on the left column
+        panel_h = n_r * 0.42 + 1.1
+        fig, axes = plt.subplots(nrow, ncol, squeeze=False,
+                                 figsize=(panel_w * ncol, panel_h * nrow))
+        fig.patch.set_facecolor("white")
+        for idx in range(nrow * ncol):
+            ax = axes[idx // ncol][idx % ncol]
+            if idx >= n_panels:
+                ax.axis("off")
+                continue
+            m = models[idx]
+            ax.set_aspect("auto")
+            for row_i, rk in enumerate(row_order):
+                for col_i, lim in enumerate(limits):
+                    val = cell_getter(m, rk, lim)
+                    ax.add_patch(plt.Rectangle(
+                        [col_i, row_i], 1, 1, color=cell_color(m, rk, lim)))
+                    if pd.notna(val):
+                        for y_frac, s, fs in cell_text(m, rk, lim):
+                            ax.text(col_i + 0.5, row_i + y_frac, s, ha="center",
+                                    va="center", fontsize=fs, fontweight="bold")
+            ax.set_xlim(0, n_l)
+            ax.set_ylim(0, n_r)
+            ax.set_xticks([i + 0.5 for i in range(n_l)])
+            ax.set_xticklabels([f"@{lim}" for lim in limits], fontsize=8)
+            # Row (TA/stratum) labels only on the left-most column of the grid.
+            if idx % ncol == 0:
+                ax.set_yticks([i + 0.5 for i in range(n_r)])
+                ax.set_yticklabels(row_labels, fontsize=8)
+            else:
+                ax.set_yticks([])
+            ax.invert_yaxis()
+            ax.xaxis.tick_top()
+            ax.xaxis.set_label_position("top")
+            ax.tick_params(length=0)
+            ax.set_title(model_display.get(m, m), fontsize=10, pad=14)
+            for gs in (group_seps or []):
+                ax.axhline(gs, color="white", linewidth=2)
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+        fig.tight_layout()
+        logger.info(f"Saving plot to {out_path}")
+        fig.savefig(str(out_path), dpi=300, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+
+    def _rs_at(pivot, row, model, limit):
+        key = (model, limit)
+        return pivot.loc[row, key] if (row in pivot.index and key in pivot.columns) else np.nan
+
+    _avg_row_i = (ta_order.index("average primary therapeutic area")
+                  if "average primary therapeutic area" in ta_order else None)
+    _render_stacked_heatmap(
+        rs_pivot, _heatmap_models, _heatmap_limits, ta_order, ta_order,
+        plots_dir / "relative_success_by_ta_heatmap.png",
+        cell_getter=lambda m, ta, lim: _rs_at(rs_pivot, ta, m, lim),
+        cell_color=lambda m, ta, lim: (
+            per_model_cmaps[m](per_model_norms[m](_rs_at(rs_pivot, ta, m, lim)))
+            if pd.notna(_rs_at(rs_pivot, ta, m, lim)) else (0.85, 0.85, 0.85, 1)),
+        cell_text=lambda m, ta, lim: [(0.5, f"{_rs_at(rs_pivot, ta, m, lim):.2f}", 8)],
+        group_seps=[_avg_row_i] if _avg_row_i is not None else [],
     )
-    ax.set_yticks([i + 0.5 for i in range(n_rows)])
-    ax.set_yticklabels(ta_order, fontsize=9)
-    ax.invert_yaxis()
-    ax.xaxis.tick_top()
-    ax.xaxis.set_label_position("top")
-    ax.tick_params(length=0)
-
-    # Separator lines between model groups
-    for sep in range(len(_heatmap_limits), n_cols, len(_heatmap_limits)):
-        ax.axvline(sep, color="white", linewidth=2)
-    # Separator before "average primary therapeutic area" row
-    if "average primary therapeutic area" in ta_order:
-        sep_row = ta_order.index("average primary therapeutic area")
-        ax.axhline(sep_row, color="white", linewidth=2)
-
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-
-    ax.set_title("", pad=0)
-    fig.tight_layout()
-
-    out_path = plots_dir / "relative_success_by_ta_heatmap.png"
-    logger.info(f"Saving plot to {out_path}")
-    fig.savefig(str(out_path), dpi=300, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
 
     # Plot 5d: stratum x model RS heatmap (TA-mean per stratum). Same table
     # style as the per-TA heatmap; rows = evidence/clinical-history strata,
     # cols = model x cutoff. Summarises the numbers in the by-stratum text.
+    # Match the 4-stratum set used by the other stratified plots (literature_only
+    # and direct_evidence are intentionally excluded — see _stratum_order below).
     _strat_hm_order = [s for s in
-                       ["all", "evidence_free", "literature_only",
-                        "direct_evidence", "known", "pioneer"]
+                       ["all", "pioneer", "known", "evidence_free"]
                        if s in set(rs_by_limit_full["stratum"])]
     _strat_hm_display = {
         "all": "all pairs",
@@ -1272,38 +1388,16 @@ def evaluate(
                 vmn, vmx = 0.0, 1.0
             s_norms[m] = mcolors.Normalize(vmin=vmn, vmax=vmx)
 
-        s_nrows, s_ncols = shm_pivot.shape
-        s_fig_w = max(6, s_ncols * 1.2 + 3.0)
-        s_fig_h = max(2.5, s_nrows * 0.55 + 1.5)
-        sfig, sax = plt.subplots(figsize=(s_fig_w, s_fig_h))
-        sfig.patch.set_facecolor("white")
-        sax.set_aspect("auto")
-        for row_i, st in enumerate(s_row_order):
-            for col_i, (mn, lim) in enumerate(s_col_order):
-                v = shm_pivot.loc[st, (mn, lim)] if (mn, lim) in shm_pivot.columns else np.nan
-                color = per_model_cmaps[mn](s_norms[mn](v)) if pd.notna(v) else (0.85, 0.85, 0.85, 1)
-                sax.add_patch(plt.Rectangle([col_i, row_i], 1, 1, color=color))
-                if pd.notna(v):
-                    sax.text(col_i + 0.5, row_i + 0.5, f"{v:.2f}",
-                             ha="center", va="center", fontsize=8, fontweight="bold")
-        sax.set_xlim(0, s_ncols)
-        sax.set_ylim(0, s_nrows)
-        sax.set_xticks([i + 0.5 for i in range(s_ncols)])
-        sax.set_xticklabels([f"{model_display.get(m, m)}@{lim}" for m, lim in s_col_order],
-                            rotation=90, ha="center", fontsize=9)
-        sax.set_yticks([i + 0.5 for i in range(s_nrows)])
-        sax.set_yticklabels([_strat_hm_display.get(s, s) for s in s_row_order], fontsize=9)
-        sax.invert_yaxis()
-        sax.xaxis.tick_top()
-        sax.xaxis.set_label_position("top")
-        sax.tick_params(length=0)
-        for sep in range(len(_heatmap_limits), s_ncols, len(_heatmap_limits)):
-            sax.axvline(sep, color="white", linewidth=2)
-        sfig.tight_layout()
-        s_out = plots_dir / "relative_success_by_stratum_heatmap.png"
-        logger.info(f"Saving plot to {s_out}")
-        sfig.savefig(str(s_out), dpi=300, bbox_inches="tight", facecolor="white")
-        plt.close(sfig)
+        _render_stacked_heatmap(
+            shm_pivot, _heatmap_models, _heatmap_limits, s_row_order,
+            [_strat_hm_display.get(s, s) for s in s_row_order],
+            plots_dir / "relative_success_by_stratum_heatmap.png",
+            cell_getter=lambda m, st, lim: _rs_at(shm_pivot, st, m, lim),
+            cell_color=lambda m, st, lim: (
+                per_model_cmaps[m](s_norms[m](_rs_at(shm_pivot, st, m, lim)))
+                if pd.notna(_rs_at(shm_pivot, st, m, lim)) else (0.85, 0.85, 0.85, 1)),
+            cell_text=lambda m, st, lim: [(0.5, f"{_rs_at(shm_pivot, st, m, lim):.2f}", 8)],
+        )
 
     # Plot 6: RS delta vs RDG heatmap (green = better than RDG, red = worse)
     _delta_models = [m for m in _heatmap_models if m != "rdg__no_time__positive"]
@@ -1319,66 +1413,38 @@ def evaluate(
                 if lim in rdg_rs.columns:
                     delta_pivot[(m, lim)] = rs_pivot[(m, lim)] - rdg_rs[lim]
 
-            n_rows_d, n_cols_d = delta_pivot.shape
-            fig_h_d = max(5, n_rows_d * 0.45 + 1.5)
-            fig_w_d = max(6, n_cols_d * 1.2 + 2.5)
-            fig_d, ax_d = plt.subplots(figsize=(fig_w_d, fig_h_d))
-            fig_d.patch.set_facecolor("white")
-            ax_d.set_aspect("auto")
-
             delta_vals = delta_pivot.values[~np.isnan(delta_pivot.values)]
             abs_max = np.abs(delta_vals).max() if len(delta_vals) > 0 else 1.0
             cmap_d = plt.get_cmap("RdYlGn")
             norm_d = mcolors.TwoSlopeNorm(vmin=-abs_max, vcenter=0, vmax=abs_max)
 
-            for row_i, ta in enumerate(ta_order):
-                for col_i, (model_name, limit) in enumerate(delta_cols):
-                    rs_val    = rs_pivot.loc[ta, (model_name, limit)] if (model_name, limit) in rs_pivot.columns else np.nan
-                    delta_val = delta_pivot.loc[ta, (model_name, limit)] if (model_name, limit) in delta_pivot.columns else np.nan
-                    color = cmap_d(norm_d(delta_val)) if pd.notna(delta_val) else (0.85, 0.85, 0.85, 1)
-                    rect  = plt.Rectangle([col_i, row_i], 1, 1, color=color)
-                    ax_d.add_patch(rect)
-                    if pd.notna(rs_val):
-                        sign = "+" if pd.notna(delta_val) and delta_val >= 0 else ""
-                        delta_str = f"{sign}{delta_val:.2f}" if pd.notna(delta_val) else ""
-                        ax_d.text(col_i + 0.5, row_i + 0.65, f"{rs_val:.2f}",
-                                  ha="center", va="center", fontsize=8, fontweight="bold")
-                        ax_d.text(col_i + 0.5, row_i + 0.30, delta_str,
-                                  ha="center", va="center", fontsize=7, color="#111111")
+            def _delta_at(ta, model, limit):
+                key = (model, limit)
+                return (delta_pivot.loc[ta, key]
+                        if (ta in delta_pivot.index and key in delta_pivot.columns)
+                        else np.nan)
 
-            ax_d.set_xlim(0, n_cols_d)
-            ax_d.set_ylim(0, n_rows_d)
-            ax_d.set_xticks([i + 0.5 for i in range(n_cols_d)])
-            ax_d.set_xticklabels(
-                [f"{model_display.get(m, m)}@{lim}" for m, lim in delta_cols],
-                rotation=90, ha="center", fontsize=9,
+            def _delta_text(m, ta, lim):
+                rs_val = _rs_at(rs_pivot, ta, m, lim)
+                if pd.isna(rs_val):
+                    return []
+                dv = _delta_at(ta, m, lim)
+                sign = "+" if pd.notna(dv) and dv >= 0 else ""
+                out = [(0.65, f"{rs_val:.2f}", 8)]
+                if pd.notna(dv):
+                    out.append((0.30, f"{sign}{dv:.2f}", 7))
+                return out
+
+            _render_stacked_heatmap(
+                delta_pivot, _delta_models, _heatmap_limits, ta_order, ta_order,
+                plots_dir / "relative_success_delta_vs_rdg.png",
+                cell_getter=lambda m, ta, lim: _rs_at(rs_pivot, ta, m, lim),
+                cell_color=lambda m, ta, lim: (
+                    cmap_d(norm_d(_delta_at(ta, m, lim)))
+                    if pd.notna(_delta_at(ta, m, lim)) else (0.85, 0.85, 0.85, 1)),
+                cell_text=_delta_text,
+                group_seps=[_avg_row_i] if _avg_row_i is not None else [],
             )
-            ax_d.set_yticks([i + 0.5 for i in range(n_rows_d)])
-            ax_d.set_yticklabels(ta_order, fontsize=9)
-            ax_d.invert_yaxis()
-            ax_d.xaxis.tick_top()
-            ax_d.xaxis.set_label_position("top")
-            ax_d.tick_params(length=0)
-
-            for sep in range(len(_heatmap_limits), n_cols_d, len(_heatmap_limits)):
-                ax_d.axvline(sep, color="white", linewidth=2)
-            if "average primary therapeutic area" in ta_order:
-                sep_row = ta_order.index("average primary therapeutic area")
-                ax_d.axhline(sep_row, color="white", linewidth=2)
-
-            for spine in ax_d.spines.values():
-                spine.set_visible(False)
-
-            sm_d = plt.cm.ScalarMappable(cmap=cmap_d, norm=norm_d)
-            sm_d.set_array([])
-            plt.colorbar(sm_d, ax=ax_d, shrink=0.6, label="RS delta vs RDG")
-            ax_d.set_title("", pad=0)
-            fig_d.tight_layout()
-
-            out_path_d = plots_dir / "relative_success_delta_vs_rdg.png"
-            logger.info(f"Saving plot to {out_path_d}")
-            fig_d.savefig(str(out_path_d), dpi=300, bbox_inches="tight", facecolor="white")
-            plt.close(fig_d)
 
     # Plot 5: RS distributions across primary TAs — violin + mean marker
     # per model, faceted by limit. The mean diamond is what reviewers should
@@ -1396,102 +1462,63 @@ def evaluate(
     rs_dist_df = rs_by_ta_primary[rs_by_ta_primary["limit"].isin(_dist_limits)].copy()
     rs_dist_df["model_slug"] = pd.Categorical(rs_dist_df["model_slug"], categories=model_order, ordered=True)
 
-    # Compute Wilcoxon p-values per limit — embed in facet label
-    limit_label_order = []
-    for limit in _dist_limits:
-        grp = rs_by_ta_primary[rs_by_ta_primary["limit"] == limit]
-        p3_v  = grp[grp["model_slug"] == p3_slug].set_index("therapeutic_area_name")["relative_success"]
-        rdg_v = grp[grp["model_slug"] == rdg_slug].set_index("therapeutic_area_name")["relative_success"]
-        paired = pd.concat([p3_v, rdg_v], axis=1, keys=["p3", "rdg"]).dropna()
-        if len(paired) >= 3 and (paired["p3"] - paired["rdg"]).abs().sum() > 0:
-            _, pval = wilcoxon(paired["p3"], paired["rdg"], alternative="greater")
-            pval_str = f"p={pval:.3f}" if pval >= 0.001 else f"p={pval:.2e}"
-            label = f"N={limit} (Wilcoxon {pval_str})"
-        else:
-            label = f"N={limit}"
-        limit_label_order.append(label)
+    # Facet label per limit (no p-values embedded).
+    limit_label_order = [f"N={limit}" for limit in _dist_limits]
 
     rs_dist_df["limit_label"] = rs_dist_df["limit"].map(dict(zip(_dist_limits, limit_label_order)))
     rs_dist_df["limit_label"] = pd.Categorical(rs_dist_df["limit_label"], categories=limit_label_order, ordered=True)
 
-    # Per-model paired Wilcoxon p-value: is EAHGT > this model across primary
-    # TAs? (one-sided, alternative="greater"). One annotation per (limit, model),
-    # placed above that model's box/violin. EAHGT itself gets no label.
-    _pval_rows = []
-    for limit in _dist_limits:
-        grp = rs_by_ta_primary[rs_by_ta_primary["limit"] == limit]
-        p3_v = grp[grp["model_slug"] == p3_slug].set_index("therapeutic_area_name")["relative_success"]
-        # y position: just above the tallest point in this facet so the label
-        # clears the violin/whisker.
-        y_top = grp["relative_success"].replace([np.inf, -np.inf], np.nan).dropna().max()
-        y_lab = (y_top * 1.04) if pd.notna(y_top) and y_top > 0 else 1.0
-        for slug in model_order:
-            if slug == p3_slug:
-                continue
-            other_v = grp[grp["model_slug"] == slug].set_index("therapeutic_area_name")["relative_success"]
-            paired = pd.concat([p3_v, other_v], axis=1, keys=["p3", "other"]).dropna()
-            if len(paired) >= 3 and (paired["p3"] - paired["other"]).abs().sum() > 0:
-                _, pval = wilcoxon(paired["p3"], paired["other"], alternative="greater")
-                lab = f"p={pval:.3f}" if pval >= 0.001 else f"p={pval:.1e}"
-            else:
-                lab = "n/a"
-            _pval_rows.append({
-                "model_slug": slug,
-                "limit": limit,
-                "limit_label": dict(zip(_dist_limits, limit_label_order))[limit],
-                "relative_success": y_lab,
-                "plabel": lab,
-            })
-    rs_pval_df = pd.DataFrame(_pval_rows)
-    rs_pval_df["model_slug"] = pd.Categorical(rs_pval_df["model_slug"], categories=model_order, ordered=True)
-    rs_pval_df["limit_label"] = pd.Categorical(rs_pval_df["limit_label"], categories=limit_label_order, ordered=True)
-
-    _save_plot(
-        pn.ggplot(rs_dist_df, pn.aes(x="model_slug", y="relative_success", fill="model_slug"))
-        + pn.geom_violin(alpha=0.55, scale="width", width=0.8, color="none")
-        + pn.geom_jitter(width=0.12, size=1.0, alpha=0.45, color="black", show_legend=False)
-        + pn.stat_summary(fun_data="mean_cl_boot", geom="point",
-                          shape="D", size=3.0, color="black", fill="white")
-        + pn.geom_text(data=rs_pval_df, mapping=pn.aes(x="model_slug", y="relative_success", label="plabel"),
-                       inherit_aes=False, size=7, color="black", va="bottom")
-        + pn.geom_hline(yintercept=1, linetype="dashed", color="grey")
-        + pn.facet_wrap("~ limit_label", nrow=1, scales="free_y")
-        + pn.scale_fill_manual(values=slug_colors, breaks=_slug_categories)
-        + pn.scale_color_manual(values=slug_colors, breaks=_slug_categories)
-        + pn.labs(x="", y="relative success (mean ◇; p = Wilcoxon EAHGT>model)")
-        + pn.theme_minimal()
-        + pn.theme(
-            figure_size=(3.5 * len(_dist_limits), 5),
-            legend_position="none",
-            axis_text_x=pn.element_text(rotation=35, ha="right"),
-        ),
-        plots_dir / "rs_distributions_ta.png",
-    )
+    def _build_rs_violin(df: pd.DataFrame) -> pn.ggplot:
+        _slugs = [s for s in _slug_categories if s in set(df["model_slug"])]
+        return (
+            pn.ggplot(df, pn.aes(x="model_slug", y="relative_success", fill="model_slug"))
+            + pn.geom_violin(alpha=0.55, scale="width", width=0.8, color="none")
+            + pn.geom_jitter(width=0.12, size=1.0, alpha=0.45, color="black", show_legend=False)
+            + pn.stat_summary(fun_data="mean_cl_boot", geom="point",
+                              shape="D", size=3.0, color="black", fill="white")
+            + pn.geom_hline(yintercept=1, linetype="dashed", color="grey")
+            + pn.facet_wrap("~ limit_label", nrow=1, scales="free_y")
+            + pn.scale_fill_manual(values=slug_colors, breaks=_slugs)
+            + pn.scale_color_manual(values=slug_colors, breaks=_slugs)
+            + pn.labs(x="", y="relative success (mean ◇)")
+            + pn.theme_minimal()
+            + pn.theme(
+                figure_size=(3.5 * len(_dist_limits), 5),
+                legend_position="none",
+                axis_text_x=pn.element_text(rotation=35, ha="right"),
+            )
+        )
 
     # Plot 5b: same data as a box plot (median + IQR). Box outliers are
     # suppressed (outlier_alpha=0) and the per-TA points are drawn as a
     # jitter layer instead, matching Plot 5, so each TA is one visible dot.
-    _save_plot(
-        pn.ggplot(rs_dist_df, pn.aes(x="model_slug", y="relative_success", fill="model_slug"))
-        + pn.geom_violin(alpha=0.55, scale="width", width=0.8, color="none")
-        + pn.geom_boxplot(width=0.12, alpha=0.7, outlier_alpha=0.0, color="black")
-        + pn.geom_jitter(width=0.12, size=1.0, alpha=0.45, color="black", show_legend=False)
-        + pn.geom_text(data=rs_pval_df, mapping=pn.aes(x="model_slug", y="relative_success", label="plabel"),
-                       inherit_aes=False, size=7, color="black", va="bottom")
-        + pn.geom_hline(yintercept=1, linetype="dashed", color="grey")
-        + pn.facet_wrap("~ limit_label", nrow=1, scales="free_y")
-        + pn.scale_fill_manual(values=slug_colors, breaks=_slug_categories)
-        + pn.scale_color_manual(values=slug_colors, breaks=_slug_categories)
-        + pn.labs(x="", y="relative success (per-TA median, IQR; p = Wilcoxon EAHGT>model)", fill="model")
-        + pn.theme_minimal()
-        + pn.theme(
-            figure_size=(3.5 * len(_dist_limits), 5),
-            legend_position="right",
-            axis_text_x=pn.element_blank(),
-            axis_ticks_major_x=pn.element_blank(),
-        ),
-        plots_dir / "rs_distributions_ta_box.png",
-    )
+    def _build_rs_box(df: pd.DataFrame) -> pn.ggplot:
+        _slugs = [s for s in _slug_categories if s in set(df["model_slug"])]
+        return (
+            pn.ggplot(df, pn.aes(x="model_slug", y="relative_success", fill="model_slug"))
+            + pn.geom_violin(alpha=0.55, scale="width", width=0.8, color="none")
+            + pn.geom_boxplot(width=0.12, alpha=0.7, outlier_alpha=0.0, color="black")
+            + pn.geom_jitter(width=0.12, size=1.0, alpha=0.45, color="black", show_legend=False)
+            + pn.geom_hline(yintercept=1, linetype="dashed", color="grey")
+            + pn.facet_wrap("~ limit_label", nrow=1, scales="free_y")
+            + pn.scale_fill_manual(values=slug_colors, breaks=_slugs)
+            + pn.scale_color_manual(values=slug_colors, breaks=_slugs)
+            + pn.labs(x="", y="relative success (per-TA median, IQR)", fill="model")
+            + pn.theme_minimal()
+            + pn.theme(
+                figure_size=(3.5 * len(_dist_limits), 5),
+                legend_position="right",
+                axis_text_x=pn.element_blank(),
+                axis_ticks_major_x=pn.element_blank(),
+            )
+        )
+
+    # Headline: proposed model + variants + OTS / RDG; full set in the _supp twin.
+    _rs_dist_headline = rs_dist_df[rs_dist_df["model_slug"].isin(_HEADLINE_SLUGS)].copy()
+    _save_plot(_build_rs_violin(_rs_dist_headline), plots_dir / "rs_distributions_ta.png")
+    _save_plot(_build_rs_violin(rs_dist_df),        plots_dir / "rs_distributions_ta_supp.png")
+    _save_plot(_build_rs_box(_rs_dist_headline),    plots_dir / "rs_distributions_ta_box.png")
+    _save_plot(_build_rs_box(rs_dist_df),           plots_dir / "rs_distributions_ta_box_supp.png")
 
     # ------------------------------------------------------------------
     # Stratified plots (novelty × evidence sparsity)
@@ -1522,7 +1549,7 @@ def evaluate(
     }
     _stratum_label_order = [_stratum_label[s] for s in _stratum_order]
 
-    # Stratified classification metrics boxplot across primary TAs (stratum × TA)
+    # Stratified classification metrics violin across primary TAs (stratum × TA)
     cm_strat = classification_metrics[
         classification_metrics["therapeutic_area_name"].isin(primary_therapeutic_areas)
         & classification_metrics["stratum"].isin(_stratum_order)
@@ -1539,8 +1566,9 @@ def evaluate(
     )
     _save_plot(
         pn.ggplot(cm_strat_melt, pn.aes(x="model_slug", y="value", fill="model_slug"))
-        + pn.geom_boxplot(outlier_size=1, alpha=0.6)
-        + pn.geom_jitter(width=0.15, size=1.2, alpha=0.7)
+        + pn.geom_violin(alpha=0.55, scale="width", width=0.8, color="none")
+        + pn.geom_boxplot(width=0.12, alpha=0.7, outlier_alpha=0.0, color="black")
+        + pn.geom_jitter(width=0.12, size=1.2, alpha=0.7, color="black", show_legend=False)
         + pn.facet_grid("metric ~ stratum_label", scales="free_y")
         + pn.scale_fill_manual(values=slug_colors, breaks=_slug_categories)
         + pn.labs(x="", y="", fill="model")
@@ -1567,22 +1595,33 @@ def evaluate(
         rs_strat.groupby(["stratum", "model_slug"])["relative_success"]
         .transform(lambda s: s.rolling(window=5, center=True, min_periods=1).mean())
     )
-    _strat_slugs = [s for s in _slug_categories if s in set(rs_strat["model_slug"])]
+    def _build_stratum_plot(rs_df: pd.DataFrame) -> pn.ggplot:
+        _slugs = [s for s in _slug_categories if s in set(rs_df["model_slug"])]
+        return (
+            # Match Figure 3a: faint raw points + smoothed line, dashed Random line.
+            pn.ggplot(rs_df, pn.aes(x="limit", y="relative_success", color="model_slug", group="model_slug"))
+            + pn.geom_point(alpha=0.3, size=1, show_legend=False)
+            + pn.geom_line(pn.aes(y="relative_success_smooth"), size=1, alpha=0.8)
+            + pn.geom_hline(yintercept=1, linetype="dashed")
+            + pn.facet_wrap("~ stratum_label", ncol=2, scales="free_y")
+            + pn.scale_color_manual(values=slug_colors, breaks=_slugs)
+            + pn.scale_x_continuous(breaks=np.arange(10, 101, 20).tolist())
+            + pn.scale_y_continuous(limits=(0, None))
+            + pn.labs(x="N top target-disease pairs (per therapeutic area)",
+                      y="mean relative success across TAs", color="model")
+            + pn.theme_minimal()
+            + pn.theme(figure_size=(10, 8))
+        )
+
+    # Headline: proposed model + variants + OTS / RDG (evidence-sparse recovery
+    # story). Full model set relegated to the _supp twin.
     _save_plot(
-        # Match Figure 3a: faint raw points + smoothed line, dashed Random line.
-        pn.ggplot(rs_strat, pn.aes(x="limit", y="relative_success", color="model_slug", group="model_slug"))
-        + pn.geom_point(alpha=0.3, size=1, show_legend=False)
-        + pn.geom_line(pn.aes(y="relative_success_smooth"), size=1, alpha=0.8)
-        + pn.geom_hline(yintercept=1, linetype="dashed")
-        + pn.facet_wrap("~ stratum_label", ncol=2, scales="free_y")
-        + pn.scale_color_manual(values=slug_colors, breaks=_strat_slugs)
-        + pn.scale_x_continuous(breaks=np.arange(10, 101, 20).tolist())
-        + pn.scale_y_continuous(limits=(0, None))
-        + pn.labs(x="N top target-disease pairs (per therapeutic area)",
-                  y="mean relative success across TAs", color="model")
-        + pn.theme_minimal()
-        + pn.theme(figure_size=(10, 8)),
+        _build_stratum_plot(rs_strat[rs_strat["model_slug"].isin(_HEADLINE_SLUGS)].copy()),
         plots_dir / "relative_success_by_limit_by_stratum.png",
+    )
+    _save_plot(
+        _build_stratum_plot(rs_strat),
+        plots_dir / "relative_success_by_limit_by_stratum_supp.png",
     )
 
     focal_model = next(

@@ -3,13 +3,13 @@
 single test_predictions.parquet per architecture, named with the canonical
 slug evaluate_advancement.py expects (e.g. p3_eahgt_both, b1_hgt, ...).
 
-Writes to /gpfs/scratch/bty414/opentarget_evidences/23.06/runs/headline_agg/
+Writes to /gpfs/scratch/bty414/opentarget_evidences/26.03/runs/headline_agg/
 """
 from pathlib import Path
 import pandas as pd
 
-BASE = Path("/gpfs/scratch/bty414/opentarget_evidences/23.06/runs/headline")
-OUT = Path("/gpfs/scratch/bty414/opentarget_evidences/23.06/runs/headline_agg")
+BASE = Path("/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/headline")
+OUT = Path("/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/headline_agg")
 OUT.mkdir(parents=True, exist_ok=True)
 
 ARCHS = ["b1_hgt", "b3_gatv2", "b6_rgcn", "b7_compgcn", "p3_eahgt_both"]

@@ -152,7 +152,7 @@ def create_random_embeddings(node_ids_file: str, output_path: str, embedding_dim
 def main():
     parser = argparse.ArgumentParser(description="Build all node features from graph mappings")
     parser.add_argument("--mappings-file", required=True, help="Path to temporal_graph_mappings.pt")
-    parser.add_argument("--evidence-dir", default="data/evidenceDated_subset/23.06", help="Evidence directory with full node data")
+    parser.add_argument("--evidence-dir", default="data/evidenceDated_subset/26.03", help="Evidence directory with full node data")
     parser.add_argument("--feature-data-dir", default="data/node_features", help="Raw feature data directory (for targets)")
     parser.add_argument("--output-dir", default="output/features/processed", help="Output directory for features")
     parser.add_argument("--temp-dir", default="output/features/temp_nodes", help="Temporary directory for extracted node IDs")

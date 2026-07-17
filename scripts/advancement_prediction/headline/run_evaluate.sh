@@ -13,12 +13,10 @@ set -euo pipefail
 REPO_ROOT="/data/home/bty414/opentarget_temporal_study/src/opentarget_het_graph"
 cd "$REPO_ROOT"
 
-GRAPH="/gpfs/scratch/bty414/opentarget_evidences/23.06/graph/hetero_graph_with_features_datatype.pt"
-MAPPINGS="/gpfs/scratch/bty414/opentarget_evidences/23.06/progression/temporal_graph_datatype_mappings.pt"
-BASE="/gpfs/scratch/bty414/opentarget_evidences/23.06/runs/headline"
+GRAPH="/gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype_w3.pt"
+MAPPINGS="/gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_w3_mappings.pt"
+BASE="/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/headline"
 SEED=42
-
-BILINEAR_PRED="/gpfs/scratch/bty414/opentarget_evidences/23.06/runs/headline_bilinear/p3_eahgt_both_s42/test_predictions.parquet"
 
 run_eval () {
     local label="$1"; shift
@@ -26,21 +24,18 @@ run_eval () {
     local out_dir="${REPO_ROOT}/headline_results/${label}"
     mkdir -p "$out_dir"
     local inject
-    inject=$(uv run python - "$BASE" "$SEED" "$BILINEAR_PRED" "${archs[@]}" <<'PY'
+    inject=$(uv run python - "$BASE" "$SEED" "${archs[@]}" <<'PY'
 import json, os, sys
-base = sys.argv[1]; seed = sys.argv[2]; bilinear_pred = sys.argv[3]; archs = sys.argv[4:]
+base = sys.argv[1]; seed = sys.argv[2]; archs = sys.argv[3:]
 entries = []
 for a in archs:
     p = f"{base}/{a}_s{seed}/test_predictions.parquet"
     if os.path.exists(p):
         entries.append({"path": p, "model_name": a})
-# Inject prior-best bilinear EAHGT (MLP-HP inherited; collapse-resistant decoder)
-if os.path.exists(bilinear_pred):
-    entries.append({"path": bilinear_pred, "model_name": "p3_eahgt_both_bilinear"})
 print(json.dumps(entries))
 PY
 )
-    echo "=== ${label}: ${archs[*]} + bilinear ==="
+    echo "=== ${label}: ${archs[*]} ==="
     uv run python evaluate_advancement.py evaluate \
         --graph_file "$GRAPH" \
         --mappings_file "$MAPPINGS" \

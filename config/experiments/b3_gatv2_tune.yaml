@@ -2,8 +2,8 @@ experiment:
   name: b3_gatv2_tune
 
 data:
-  graph_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/graph/hetero_graph_with_features_datatype.pt
-  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/23.06/progression/temporal_graph_datatype_mappings.pt
+  graph_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype_w3.pt
+  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_w3_mappings.pt
   undirected: true
 
 # Study A — Model comparison: GATv2 with NO edge features.
@@ -17,7 +17,7 @@ model:
   edge_feat_dim: 0
 
 train:
-  output_dir: /gpfs/scratch/bty414/opentarget_evidences/23.06/runs/b3_gatv2_tune
+  output_dir: /gpfs/scratch/bty414/opentarget_evidences/26.03/runs/b3_gatv2_tune
   num_epochs: 50
   lr: 0.0004346878320299101
   weight_decay: 0.0018260646941480677

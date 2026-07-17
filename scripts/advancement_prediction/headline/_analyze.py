@@ -4,7 +4,6 @@
 Outputs go under `headline_results/`:
   table1_metrics.csv          5 GNNs (mean ± std × 3 seeds) + tabular baselines
   table1_metrics.tex          LaTeX form
-  table2_val_test_corr.csv    Val→test correlation (from leakfix_val_sweep, val_year=2013)
   table3_disease_concentration.csv   Top-K unique-disease counts per model
   figure1_rr_at_k.png         RR@K curves with seed-variance bands
   figure2_per_ta_boxplot.png  Per-TA rs_ta_mean@30 boxplots
@@ -23,8 +22,7 @@ import numpy as np
 import pandas as pd
 
 REPO = Path(__file__).resolve().parents[3]
-HEADLINE_DIR = Path("/gpfs/scratch/bty414/opentarget_evidences/23.06/runs/headline")
-LEAKFIX_DIR = Path("/gpfs/scratch/bty414/opentarget_evidences/23.06/runs/leakfix_val_sweep")
+HEADLINE_DIR = Path("/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/headline")
 ZARR = REPO / "advancement_data" / "datasets" / "evaluation_dataset.zarr"
 TA_PARQUET = REPO / "advancement_data" / "features" / "therapeutic_areas.parquet"
 PRIMARY_TAS_JSON = REPO / "advancement_data" / "results" / "primary_therapeutic_areas.json"
@@ -142,43 +140,6 @@ def build_table1(gnn_df, base_df):
         row = {"model": r["display"], "n_seeds": 1, "best_epoch": "-"}
         for k in KEY_TEST_METRICS:
             row[k] = f"{r[k]:.2f}"
-        out.append(row)
-    return pd.DataFrame(out)
-
-
-# ---------------- Table 2: val→test correlation (existing leakfix data) ----------------
-
-def build_table2_correlation():
-    """Compute val→test Pearson correlation for val_year=2013 across all
-    candidate val metrics. Uses the existing 9-run leakfix sweep."""
-    rows = []
-    for d in sorted(LEAKFIX_DIR.glob("v2013_s*")):
-        df = pd.read_csv(d / "epoch_metrics.csv")
-        df["seed"] = int(d.name.split("_s")[-1])
-        rows.append(df)
-    if not rows:
-        return pd.DataFrame()
-    all_df = pd.concat(rows, ignore_index=True)
-
-    val_metrics = [
-        "val_roc_auc", "val_average_precision",
-        "val_rs@10", "val_rs@50", "val_rs@100",
-        "val_rs_ta_mean@10", "val_rs_ta_mean@30", "val_rs_ta_mean@50",
-        "val_ndcg@50", "val_ndcg_ta_mean@10",
-        "val_ndcg_ta_mean@30", "val_ndcg_ta_mean@50",
-    ]
-    test_targets = ["test_rs@10", "test_rs_ta_mean@30", "test_ndcg_ta_mean@30"]
-    out = []
-    for vm in val_metrics:
-        if vm not in all_df.columns:
-            continue
-        row = {"val_metric": vm}
-        for tt in test_targets:
-            sub = all_df[[vm, tt]].dropna()
-            if len(sub) < 5 or sub[vm].nunique() < 2:
-                row[tt] = float("nan")
-            else:
-                row[tt] = sub[vm].corr(sub[tt])
         out.append(row)
     return pd.DataFrame(out)
 
@@ -323,12 +284,6 @@ def main():
     t1 = build_table1(gnn, base)
     t1.to_csv(OUT_DIR / "table1_metrics.csv", index=False)
     print(t1.to_string(index=False))
-
-    print("\nBuilding Table 2 (val→test correlation, val_year=2013)…")
-    t2 = build_table2_correlation()
-    if not t2.empty:
-        t2.to_csv(OUT_DIR / "table2_val_test_corr.csv", index=False)
-        print(t2.to_string(index=False, float_format=lambda x: f"{x:+.3f}"))
 
     print("\nBuilding Table 3 (disease concentration)…")
     t3 = build_table3_disease_concentration(base)

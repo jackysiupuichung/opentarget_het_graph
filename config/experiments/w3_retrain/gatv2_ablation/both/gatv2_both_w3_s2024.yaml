@@ -1,0 +1,43 @@
+experiment:
+  name: gatv2_both_w3_s2024
+data:
+  graph_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/graph/hetero_graph_with_features_datatype_w3.pt
+  mappings_file: /gpfs/scratch/bty414/opentarget_evidences/26.03/progression/temporal_graph_datatype_w3_mappings.pt
+  undirected: true
+  random_val_frac: 0.2
+  random_seed: 2024
+model:
+  name: gatv2
+  hidden_dim: 64
+  num_heads: 4
+  num_layers: 1
+  dropout: 0.2
+  edge_feat_cols: [0, 1]
+  edge_feat_dim: 2
+train:
+  output_dir: /gpfs/scratch/bty414/opentarget_evidences/26.03/runs/w3_retrain/gatv2_ablation/both/gatv2_both_w3_s2024
+  num_epochs: 40
+  lr: 0.0009511974905423232
+  weight_decay: 0.0011653823378934012
+  eta_min: 1.0e-6
+  cosine_t_max: 40
+  batch_size: 256
+  num_neighbors: [30, 20]
+  eval_every: 1
+  lambdarank:
+    impl: allrank_grouped
+    weighing_scheme: lambdaRank_scheme
+    sigma: 1.4319388789983414
+    ndcg_k: 100
+    group_all_tas: true
+  early_stopping:
+    enabled: false
+    patience: 999
+    metric: rs_ta_median@50
+    mode: max
+seed: 2024
+eval:
+  prospective:
+    diseases: []
+    cutoff_year: 2015
+    ks: [100]

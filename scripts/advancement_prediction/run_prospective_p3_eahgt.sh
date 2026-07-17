@@ -17,7 +17,7 @@ cd "$REPO_ROOT"
 source .venv/bin/activate
 export WANDB_MODE="disabled"
 
-OUTPUT_DIR="/gpfs/scratch/bty414/opentarget_evidences/23.06/runs/p3_eahgt_both_lambdarank_v2"
+OUTPUT_DIR="/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/p3_eahgt_both_lambdarank_v2"
 CSV="advancement_data/prospective_diseases.csv"
 
 # Read EFO IDs (column 'EFO_ID') into a bash array

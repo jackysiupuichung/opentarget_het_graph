@@ -19,11 +19,11 @@ STATIC_EDGES_DIR="${KG_OUTPUT_DIR}/static_edges"
 RAW_EDGES_DIR="${KG_OUTPUT_DIR}/edges"
 EVENT_OUTPUT_DIR="${OUTPUT_BASE}/progression"
 
-# Advancement labels — mixed-version setup: 26.03 graph + 23.06 advancement
-# CSVs. Compatibility verified: 98.2% train / 97.9% test endpoints exist in
-# the 26.03 graph. See data/clinical_trial_advancement/.
-ADV_TRAIN="data/clinical_trial_advancement/23.06/train_dataset.csv"
-ADV_TEST="data/clinical_trial_advancement/23.06/test_dataset.csv"
+# Advancement labels — 26.03 w3 window. The 23.06 label CSVs had a same-year
+# clinical-trial-edge leak and are retired; the w3 labels are built on the 26.03
+# graph generation. See data/clinical_trial_advancement/.
+ADV_TRAIN="data/clinical_trial_advancement/26.03_w3/train_dataset.csv"
+ADV_TEST="data/clinical_trial_advancement/26.03_w3/test_dataset.csv"
 
 # === Build Graph Structures (datasource-level and datatype-level) ===
 
