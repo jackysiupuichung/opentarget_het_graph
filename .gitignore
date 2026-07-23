@@ -10,8 +10,9 @@ env/
 venv/
 .env
 
-# OS
+# OS / editor
 .DS_Store
+.vscode/
 
 # Data directories (root level only, not src/data)
 /data/
