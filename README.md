@@ -14,7 +14,7 @@ description and statistics are in [croissant.json](croissant.json).
 ## Dataset
 
 Packaged 26.03 graph + advancement benchmark are archived on Zenodo
-([doi.org/10.5281/zenodo.20795232](https://doi.org/10.5281/zenodo.20795232),
+([doi.org/10.5281/zenodo.20795231](https://doi.org/10.5281/zenodo.20795231),
 CC-BY-4.0). Point the code at an unpacked copy:
 
 ```bash
@@ -47,6 +47,13 @@ a randomized-decisions baseline. RDG (Czech et al. ridge regression) and OTS
 (Open Targets global score) references come from the packaged
 `evaluation_dataset.zarr`. The official EA-HGT result is a grouped five-seed,
 validation-selected, percentile-rank-fused ensemble.
+
+## Explainability
+
+Post-hoc explanation code lives under `explain/`: the library in `src/explain/`
+(integrated gradients, attention, PaGE-Link), command-line entrypoints in
+`explain/cli/`, evidence-assembly helpers in `explain/evidence/`, case-study
+tooling in `explain/casestudy/`, and SLURM drivers in `explain/drivers/`.
 
 ## Rebuild from source
 

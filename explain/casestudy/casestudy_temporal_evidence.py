@@ -197,7 +197,7 @@ def cumulative_max_by_source(df, years):
 # (config/edge_schema_26.03.yaml), so a datasource is never mislabelled.
 def _load_src_to_relation():
     import yaml
-    schema_path = os.path.join(os.path.dirname(__file__), "..", "config",
+    schema_path = os.path.join(os.path.dirname(__file__), "..", "..", "config",
                                "edge_schema_26.03.yaml")
     with open(schema_path) as fh:
         schema = yaml.safe_load(fh)

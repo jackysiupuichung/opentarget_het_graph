@@ -42,7 +42,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # repo root (explain/cli/ -> repo)
 sys.path.insert(0, str(ROOT))
 
 from src.data.temporal_loader import ADV_ETYPE, build_edge_time_dict
@@ -82,9 +82,12 @@ def _flat_attributions(
     on THIS batch so they index the batch's own edge_index_dict columns.
     """
     # IG: signed per-edge contribution = sum over feature dims.
+    # Edge-features-only IG: the fidelity metric masks EDGES and ignores node
+    # attributions, and attributing node features breaks encoders where a
+    # subgraph node type may not reach the query logit (e.g. 1-layer GATv2).
     ig = integrated_gradients_for_pair(
         model=rt.model, batch=batch, edge_feat_cols=rt.edge_feat_cols,
-        edge_time_dict=edge_time_dict, n_steps=n_steps,
+        edge_time_dict=edge_time_dict, n_steps=n_steps, attribute_nodes=False,
     )
     ig_by_et = {et: a.sum(dim=1).numpy() for et, a in ig.edge_feat_attr.items()}
 

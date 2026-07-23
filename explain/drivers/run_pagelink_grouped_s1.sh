@@ -28,7 +28,7 @@ RUN_DIR=/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/lr_grouped_k100/lrg
 PAIRS="${1:-explain_pairs_evfree_diverse.csv}"
 OUT_DIR=$REPO_ROOT/headline_results/evaluate_advancement/pagelink_grouped_s1
 
-python pagelink_explain.py \
+python explain/cli/pagelink_explain.py \
     --config       "$RUN_DIR/config.yaml" \
     --checkpoint   "$RUN_DIR/best_model.pt" \
     --pairs-csv    "$PAIRS" \

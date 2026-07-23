@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # repo root (explain/cli/ -> repo)
 sys.path.insert(0, str(ROOT))
 
 from src.data.temporal_loader import ADV_ETYPE, build_edge_time_dict

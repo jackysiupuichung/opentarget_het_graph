@@ -39,7 +39,7 @@ from omegaconf import OmegaConf
 from scipy.special import expit
 from torch_geometric.loader import LinkNeighborLoader
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # repo root (explain/cli/ -> repo)
 sys.path.insert(0, str(ROOT))
 
 from src.data.temporal_loader import (

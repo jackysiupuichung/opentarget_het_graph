@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J explain_p3_s42_evfree
+#SBATCH -J explain_p3_s42_evfree_verify
 #SBATCH -o %x.o%j
 #SBATCH -p gpushort
 #SBATCH -n 8
@@ -18,14 +18,14 @@ source .venv/bin/activate
 export WANDB_MODE="disabled"
 
 RUN_DIR=/gpfs/scratch/bty414/opentarget_evidences/26.03/runs/headline/p3_eahgt_both_s42
-OUT_DIR=$REPO_ROOT/headline_results/evaluate_advancement/explanations_evidence_free
+OUT_DIR=$REPO_ROOT/headline_results/evaluate_advancement/explanations_evidence_free_verify
 PAIRS=$OUT_DIR/pairs.csv
 
-python explain_advancement.py \
+python explain/cli/explain_advancement.py \
     --config     "$RUN_DIR/config.yaml" \
     --checkpoint "$RUN_DIR/best_model.pt" \
     --out-dir    "$OUT_DIR" \
     --pairs-csv  "$PAIRS" \
-    --case-studies 5 \
+    --case-studies 1 \
     --case-top-k 20 \
     --n-steps 32
